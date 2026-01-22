@@ -1,0 +1,30 @@
+# Python
+*__pycache__*
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Confidental
+.env
+.env.*
+*.pem
+*.key

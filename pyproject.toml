@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Nexom"
+version = "0.1.2"
+description = "Lightweight Python Web Framework (WSGI)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "TouriAida" }
+]
+keywords = ["wsgi", "web", "framework"]
+
+[project.urls]
+Homepage = "https://nexom.ceez7.com"
+Repository = "https://github.com/ait913/Nexom"
+Issues = "https://github.com/ait913/Nexom/issues"
+
+[project.scripts]
+nexom = "nexom.__main__:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["nexom*"]
+
+[tool.setuptools.package-data]
+nexom = ["assets/**/*"]
+
+[project.optional-dependencies]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

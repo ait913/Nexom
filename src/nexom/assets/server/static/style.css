@@ -1,0 +1,39 @@
+body{
+    width: 100%;
+    padding: 0;
+    margin: 0;
+}
+
+header{
+    width: 100%;
+    text-align: center;
+    padding-block: 1rem;
+    margin-block-end: 1rem;
+}
+.header-title{
+    font-size: 20px;
+    font-weight: 500;
+}
+
+main{
+    position: relative;
+    width: 600px;
+    max-width: 100%;
+    margin-inline: auto;
+}
+
+footer{
+    width: 100%;
+    text-align: center;
+    padding-block: 1rem;
+    margin-block-start: 3rem;
+}
+.footer-text{
+    font-size: 0.9rem;
+}
+
+pre{
+    padding: 0.4rem 0.8rem;
+    background-color: rgb(239 239 239);
+    border-radius: 0.4rem;
+}
