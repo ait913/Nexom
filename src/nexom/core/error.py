@@ -108,3 +108,32 @@ class TemplateKeyNotSetError(NexomError):
             "T03",
             f"The required keys for this template are not set. '{key}'",
         )
+
+
+# =========================
+# ObjectHTML
+# =========================
+class ObjectHTMLInsertValueError(NexomError):
+    """Raised when an insert value for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH01",
+            f"This insert value is invalid. '{name}'",
+        )
+class ObjectHTMLExtendsError(NexomError):
+    """Raised when an extends for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH02",
+            f"This extends is invalid. '{name}'",
+        )
+class ObjectHTMLImportError(NexomError):
+    """Raised when an import for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH03",
+            f"This import is invalid. '{name}'",
+        )
