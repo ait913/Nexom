@@ -92,19 +92,58 @@ class TemplateNotFoundError(NexomError):
     def __init__(self, name: str) -> None:
         super().__init__("T01", f"This template is not found. '{name}'")
 
-
-class TemplatesInvalidTypeError(NexomError):
-    """Raised when an invalid object is added to Templates."""
-
-    def __init__(self) -> None:
-        super().__init__("T02", "This list only accepts Template objects.")
-
-
-class TemplateKeyNotSetError(NexomError):
-    """Raised when required template variables are missing."""
+class TemplateInvalidNameError(NexomError):
+    """Raised when a template file/dir name violates Nexom template naming rules."""
 
     def __init__(self, key: str) -> None:
         super().__init__(
+            "T02",
+            f"This template name is invalid. '{key}'",
+        )
+
+class TemplatesNotDirError(NexomError):
+    """Raised when the base templates directory is not a directory."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
             "T03",
-            f"The required keys for this template are not set. '{key}'",
+            f"This base path is not a directory. '{path}'"
+        )
+
+
+# =========================
+# ObjectHTML
+# =========================
+class HTMLDocLibNotFoundError(NexomError):
+    """Raised when an HTML document is not found in the library."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "HD01",
+            f"This HTML document is not found in the library. '{name}'",
+        )
+
+class ObjectHTMLInsertValueError(NexomError):
+    """Raised when an insert value for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH01",
+            f"This insert value is invalid. '{name}'",
+        )
+class ObjectHTMLExtendsError(NexomError):
+    """Raised when an extends for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH02",
+            f"This extends is invalid. '{name}'",
+        )
+class ObjectHTMLImportError(NexomError):
+    """Raised when an import for ObjectHTML is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(
+            "OH03",
+            f"This import is invalid. '{name}'",
         )

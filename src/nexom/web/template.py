@@ -1,105 +1,115 @@
 from __future__ import annotations
-import os
+
 import re
-from typing import Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-from ..core.error import TemplateNotFoundError, TemplatesInvalidTypeError
+from ..engine.object_html_render import HTMLDoc, HTMLDocLib, ObjectHTML
+from ..core.error import TemplateNotFoundError, TemplateInvalidNameError, TemplatesNotDirError
+
+_SEG_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-class Template:
+@dataclass(frozen=True)
+class TemplateEntry:
+    name: str
+    path: Path
+
+
+class _TemplateAccessor:
     """
-    Represents an HTML template with optional inheritance, insertions, and imports.
+    Callable attribute-chain proxy.
+
+    Examples:
+        templates.default(title="x")        -> templates.render("default", title="x")
+        templates.layout.base(title="x")    -> templates.render("layout.base", title="x")
     """
 
-    def __init__(self, template: str, base_dir: Optional[str] = None, **kwargs: str) -> None:
-        self.template: str = template
-        self.base_dir: Optional[str] = base_dir
-        self.kwargs: dict[str, str] = kwargs
-        self._doc: str = self._assemble()
+    def __init__(self, templates: ObjectHTMLTemplates, name: str) -> None:  # type: ignore[name-defined]
+        self._templates = templates
+        self._name = name
 
-    def _open(self, template: str, **kwargs: str) -> str:
-        template_file = template if template.endswith(".html") else f"{template}.html"
-        path = os.path.join(self.base_dir, template_file) if self.base_dir else template_file
+    def __getattr__(self, part: str) -> _TemplateAccessor:
+        if not _SEG_RE.match(part):
+            # Attribute access only supports valid segments by design.
+            raise AttributeError(part)
+        return _TemplateAccessor(self._templates, f"{self._name}.{part}")
 
-        if not os.path.exists(path):
-            raise TemplateNotFoundError(template_file)
-
-        with open(path, "r", encoding="utf-8") as f:
-            doc = f.read()
-
-        return self._render(doc, **kwargs)
-
-    def _render(self, doc: str, **kwargs: str) -> str:
-        """
-        Replace {{key}} with kwargs values in the template.
-        """
-        pattern = re.compile(r"\{\{\s*(\w+)\s*\}\}")
-
-        def replace(m: re.Match) -> str:
-            key = m.group(1)
-            if key not in kwargs:
-                raise TemplateNotFoundError(key)
-            return str(kwargs[key])
-
-        return pattern.sub(replace, doc)
-
-    def _assemble(self) -> str:
-        doc = self._open(self.template, **self.kwargs)
-
-        # Handle <Extends base /> logic
-        extends_match = re.search(r"<Extends\s+([\w\.]+)\s*/>", doc)
-        if extends_match:
-            base_template = extends_match.group(1)
-            inserts = re.findall(r"<Insert\s+([\w\.]+)>(.*?)</Insert>", doc, flags=re.DOTALL)
-            format_values = self.kwargs.copy()
-            for target, content in inserts:
-                format_values[target] = content.strip()
-            doc = self._open(base_template, **format_values)
-
-        # Handle <Import template /> logic
-        import_pattern = re.compile(r"<Import\s+(\w+)\s*/>")
-
-        def replace_import(m: re.Match) -> str:
-            template_name = m.group(1)
-            return self._open(template_name)
-
-        return import_pattern.sub(replace_import, doc)
+    def __call__(self, **kwargs: str) -> str:
+        return self._templates.render(self._name, **kwargs)
 
     def __repr__(self) -> str:
-        return self._doc
-
-    __str__ = __repr__
-
-    def push(self, **kwargs: str) -> str:
-        """
-        Update template kwargs and re-render.
-        """
-        self.kwargs = kwargs
-        self._doc = self._assemble()
-        return self._doc
+        return f"<TemplateAccessor name='{self._name}'>"
 
 
-class Templates:
+class ObjectHTMLTemplates:
     """
-    Container for multiple Template objects with dynamic access.
+    Loads all *.html templates under base_dir and renders them using ObjectHTML.
+
+    Public API:
+        render("a.b", **kwargs) -> str
+
+    Sugar:
+        templates.a.b(**kwargs) -> render("a.b", **kwargs)
     """
 
-    def __init__(self, base_dir: str, *templates: str) -> None:
-        self.base_dir: str = base_dir
-        for template_name in templates:
-            self.append(template_name)
+    def __init__(self, base_dir: str) -> None:
+        self.base_dir = str(base_dir)
+        self._base_path = Path(self.base_dir).resolve()
 
-    def append(self, template: str) -> None:
-        """
-        Add a new template dynamically accessible as a method.
-        """
-        t_name = template.removesuffix(".html")
+        if not self._base_path.exists() or not self._base_path.is_dir():
+            raise TemplatesNotDirError(self.base_dir)
 
-        def _call(**kwargs: str) -> str:
-            return Template(t_name, self.base_dir, **kwargs).__repr__()
+        lib = HTMLDocLib()
+        for entry in self._scan_templates(self._base_path):
+            html_text = entry.path.read_text(encoding="utf-8")
+            lib.append(HTMLDoc(entry.name, html_text))
 
-        setattr(self, t_name, _call)
+        self._engine = ObjectHTML(lib=lib)
 
-    def delete(self, template: str) -> None:
-        if hasattr(self, template):
-            delattr(self, template)
+    def __getattr__(self, name: str) -> _TemplateAccessor:
+        # Called only when normal attribute lookup fails.
+        if not _SEG_RE.match(name):
+            raise AttributeError(name)
+        return _TemplateAccessor(self, name)
+
+    def render(self, name: str, **kwargs: str) -> str:
+        doc = self._engine.lib.get(name)
+        if not doc:
+            raise TemplateNotFoundError(name)
+        return self._engine.render(name, **kwargs)
+
+    def _scan_templates(self, root: Path) -> list[TemplateEntry]:
+        entries: list[TemplateEntry] = []
+
+        for path in root.rglob("*.html"):
+            if not path.is_file():
+                continue
+
+            rel = path.relative_to(root)
+            name = self._path_to_template_name(rel)
+            entries.append(TemplateEntry(name=name, path=path))
+
+        return entries
+
+    def _path_to_template_name(self, rel_path: Path) -> str:
+        parts = list(rel_path.parts)
+        if not parts:
+            raise TemplateInvalidNameError(str(rel_path))
+
+        filename = parts[-1]
+        if not filename.endswith(".html"):
+            raise TemplateInvalidNameError(str(rel_path))
+
+        stem = filename[:-5]
+        dir_parts = parts[:-1]
+
+        for seg in dir_parts:
+            if not _SEG_RE.match(seg):
+                raise TemplateInvalidNameError(str(rel_path))
+
+        if not _SEG_RE.match(stem):
+            raise TemplateInvalidNameError(str(rel_path))
+
+        return ".".join([*dir_parts, stem])

@@ -6,5 +6,5 @@ from ._templates import templates
 
 def main(request: Request, args: dict) -> Response:
     return Response(
-        templates.default(title="Nexom Default Page")
+        templates.render("default", title="Nexom Default Page")
     )

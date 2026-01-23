@@ -28,3 +28,6 @@ htmlcov/
 .env.*
 *.pem
 *.key
+
+# Private test
+user_tests/
