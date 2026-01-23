@@ -14,7 +14,8 @@ Nexomは短いコードで最低限動作し、シンプルで理解のしやす
 
 ### 1.ディレクトリの作成
 **準備**
-用意していない場合はディレクトリを作成し、仮想環境も準備てください
+
+用意していない場合はディレクトリを作成し、仮想環境も準備してください
 ```
 mkdir sample
 cd sample
@@ -22,15 +23,18 @@ cd sample
 python -m venv venv
 source venv/bin/activate
 ```
-### 2.npipでインストール、サーバーのビルド
+### 2. pipでインストール、サーバーのビルド
 **インストール**
+
 nexomをインストールします。
+
 ※まだベータ版のため、最新のバージョンを確認してください。
 ```
 pip install nexom==0.1.4
 ```
 **テンプレートサーバーのビルド**
-サーバーを置きたいディレクトリ上で、以下のコマンドを実行してください(sampleは自由)
+
+サーバーを置きたいディレクトリ上で、以下のコマンドを実行してください(名前のsampleは自由)
 ```
 python -m nexom build-server sample
 ```
@@ -42,7 +46,9 @@ gunicorn wsgi:app
 ```
 ブラウザからアクセスできるようになります。
 デフォルトのポートは8080です。
-[httpls://localhost:8080](httpls://localhost:8080)
+
+[https://localhost:8080](https://localhost:8080)
+
 ポートなどの設定は `config.py` から変更してください。
 
 ## Nginx等使用して外部公開する
@@ -50,7 +56,7 @@ gunicorn wsgi:app
 ```
 server {
     listen 443 ssl;
-        server_name nexom.ceez7.com;
+        server_name nexom.aisaba.net;
 
         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
