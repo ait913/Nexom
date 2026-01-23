@@ -27,7 +27,7 @@ source venv/bin/activate
 nexomをインストールします。
 ※まだベータ版のため、最新のバージョンを確認してください。
 ```
-pip install nexom==0.1.3
+pip install nexom==0.1.4
 ```
 **テンプレートサーバーのビルド**
 サーバーを置きたいディレクトリ上で、以下のコマンドを実行してください(sampleは自由)
