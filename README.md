@@ -1,5 +1,5 @@
 
-# NEXOM
+# Nexom
 Lightweight Python Web Framework (WSGI)
 
 Nexomは短いコードで最低限動作し、シンプルで理解のしやすい設計・構造を目指しています。
