@@ -63,22 +63,22 @@ def server(work_dir: str | Path, name: str, *, options: ServerBuildOptions | Non
     static_dir.mkdir()
 
     # ---- Copy pages ----
-    pages_pkg = "nexom.assets.server.pages"
+    pages_pkg = "nexom.assets.app.pages"
     for fn in ("__init__.py", "_templates.py", "default.py", "document.py"):
         _copy_from_package(pages_pkg, fn, pages_dir / fn)
 
     # ---- Copy templates ----
-    templates_pkg = "nexom.assets.server.templates"
+    templates_pkg = "nexom.assets.app.templates"
     for fn in ("base.html", "header.html", "footer.html", "default.html", "document.html"):
         _copy_from_package(templates_pkg, fn, templates_dir / fn)
 
     # ---- Copy static ----
-    static_pkg = "nexom.assets.server.static"
+    static_pkg = "nexom.assets.app.static"
     for fn in ("dog.jpeg", "style.css"):
         _copy_from_package(static_pkg, fn, static_dir / fn)
 
     # ---- Copy app files ----
-    app_pkg = "nexom.assets.server"
+    app_pkg = "nexom.assets.app"
     for fn in ("gunicorn.conf.py", "router.py", "wsgi.py", "config.py"):
         _copy_from_package(app_pkg, fn, out_dir / fn)
 

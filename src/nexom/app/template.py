@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..engine.object_html_render import HTMLDoc, HTMLDocLib, ObjectHTML
+from ..core.object_html_render import HTMLDoc, HTMLDocLib, ObjectHTML
 from ..core.error import TemplateNotFoundError, TemplateInvalidNameError, TemplatesNotDirError
 
 _SEG_RE = re.compile(r"^[A-Za-z0-9_]+$")

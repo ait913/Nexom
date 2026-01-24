@@ -17,7 +17,7 @@ import re
 from collections import UserList
 from typing import Final
 
-from ..core.error import (
+from .error import (
     HTMLDocLibNotFoundError,
     ObjectHTMLImportError,
     ObjectHTMLInsertValueError,

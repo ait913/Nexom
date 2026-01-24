@@ -7,8 +7,8 @@ WSGI-based web applications with minimal overhead.
 
 from __future__ import annotations
 
-from nexom.web.request import Request
-from nexom.web.response import Response
+from nexom.app.request import Request
+from nexom.app.response import Response
 
 __all__ = [
     "Request",

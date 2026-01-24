@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from nexom.buildTools.build import server as build_server
+from nexom.buildTools.build import server as build_app
 from nexom.buildTools.build import ServerBuildOptions
 
 
@@ -18,12 +18,12 @@ def main(argv: list[str] | None = None) -> None:
     # test
     subparsers.add_parser("test", help="Test Nexom installation")
 
-    # build-server
+    # build-app
     p = subparsers.add_parser(
-        "build-server",
-        help="Create a Nexom server project",
+        "build-app",
+        help="Create a Nexom app project",
     )
-    p.add_argument("server_name", help="Server project name")
+    p.add_argument("app_name", help="App project name")
     p.add_argument(
         "--out",
         default=".",
@@ -40,15 +40,15 @@ def main(argv: list[str] | None = None) -> None:
         print("Hello Nexom Web Framework!")
         return
 
-    if args.command == "build-server":
+    if args.command == "build-app":
         options = ServerBuildOptions(
             address=args.address,
             port=args.port,
             workers=args.workers,
             reload=args.reload,
         )
-        out_dir = build_server(Path(args.out), args.server_name, options=options)
-        print(f"Created Nexom server project at: {out_dir}")
+        out_dir = build_app(Path(args.out), args.app_name, options=options)
+        print(f"Created Nexom app project at: {out_dir}")
         return
 
 

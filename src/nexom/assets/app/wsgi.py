@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
-from nexom.web.request import Request
-from nexom.web.response import Response, ErrorResponse
+from nexom.app.request import Request
+from nexom.app.response import Response, ErrorResponse
 from nexom.core.error import PathNotFoundError
 
 # Project-local router

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nexom.web.template import ObjectHTMLTemplates
+from nexom.app.template import ObjectHTMLTemplates
 
 
 # templates/ directory is located at: <project_root>/templates

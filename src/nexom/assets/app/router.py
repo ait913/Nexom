@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pathlib as plib
 
-from nexom.web.path import Path, Static, Pathlib
+from nexom.app.path import Path, Static, Pathlib
 
 from pages import default, document
 
