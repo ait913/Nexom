@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from nexom.app.template import ObjectHTMLTemplates
 
+from __app_name__.config import TEMPLATES_DIR
 
-# templates/ directory is located at: <project_root>/templates
-TEMPLATES_DIR = (Path(__file__).resolve().parent.parent / "templates").resolve()
-
-templates = ObjectHTMLTemplates(base_dir=str(TEMPLATES_DIR))
+templates = ObjectHTMLTemplates(base_dir=TEMPLATES_DIR)

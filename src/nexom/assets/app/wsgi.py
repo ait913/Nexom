@@ -7,7 +7,7 @@ from nexom.app.response import Response, ErrorResponse
 from nexom.core.error import PathNotFoundError
 
 # Project-local router
-from router import routing
+from .router import routing
 
 
 def app(environ: dict, start_response: Callable) -> Iterable[bytes]:

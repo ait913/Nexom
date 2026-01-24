@@ -18,9 +18,9 @@ def main(argv: list[str] | None = None) -> None:
     # test
     subparsers.add_parser("test", help="Test Nexom installation")
 
-    # build-app
+    # create-app
     p = subparsers.add_parser(
-        "build-app",
+        "create-app",
         help="Create a Nexom app project",
     )
     p.add_argument("app_name", help="App project name")
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> None:
         print("Hello Nexom Web Framework!")
         return
 
-    if args.command == "build-app":
+    if args.command == "create-app":
         options = ServerBuildOptions(
             address=args.address,
             port=args.port,

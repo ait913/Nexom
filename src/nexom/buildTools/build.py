@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import resources
+from importlib import import_module, resources
 from pathlib import Path
+import re
 import shutil
 
 
@@ -15,48 +16,82 @@ class ServerBuildOptions:
     reload: bool = False
 
 
+_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+class ServerBuildError(RuntimeError):
+    """Raised when project generation fails for any reason."""
+
+
 def _copy_from_package(pkg: str, filename: str, dest: Path) -> None:
-    """
-    Copy a file from a package resource into the destination path.
-    """
+    """Copy a file from a package resource into the destination path."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with resources.files(pkg).joinpath(filename).open("rb") as src, dest.open("wb") as dst:
+
+    module = import_module(pkg)
+    with resources.files(module).joinpath(filename).open("rb") as src, dest.open("wb") as dst:
         shutil.copyfileobj(src, dst)
 
 
-def server(work_dir: str | Path, name: str, *, options: ServerBuildOptions | None = None) -> Path:
-    """
-    Generate a Nexom server project into `work_dir`.
+def _replace_many(text: str, repl: dict[str, str]) -> str:
+    """Apply multiple literal replacements and ensure no placeholders remain."""
+    out = text
+    for k, v in repl.items():
+        out = out.replace(k, v)
 
-    This function copies template files bundled in the package (assets) and
-    writes a ready-to-run config.py.
+    # Placeholder leak detection (generic message; detailed info should be logged elsewhere)
+    unresolved = [k for k in repl.keys() if k in out]
+    if unresolved:
+        raise ServerBuildError("Build template placeholder was not resolved.")
+    return out
+
+
+def server(
+    project_dir: str | Path,
+    app_name: str,
+    *,
+    options: ServerBuildOptions | None = None,
+) -> Path:
+    """
+    Generate a Nexom server app under:
+        <project_dir>/apps/<app_name>/
+
+    The generated directory includes:
+        pages/, templates/, static/, config.py, gunicorn.conf.py, router.py, wsgi.py
 
     Args:
-        work_dir: Output directory where project files are created.
-        name: Project name (reserved for future use; currently not used).
-        options: Config defaults for generated config.py.
+        project_dir: Project root directory where "apps/" will be created/used.
+        app_name: Application directory name (must match [A-Za-z0-9_]+).
+        options: Defaults for generated config.py values.
 
     Returns:
-        The absolute path to the generated project directory.
+        Absolute path to the generated app directory (<project_dir>/apps/<app_name>).
 
     Raises:
-        FileExistsError: If target directories/files already exist.
-        ModuleNotFoundError / FileNotFoundError: If bundled assets are missing.
+        ValueError: If app_name is invalid.
+        FileExistsError: If target app directory already exists (or is non-empty).
+        ServerBuildError: If bundled assets are missing or placeholders cannot be resolved.
     """
-    _ = name  # reserved (keep signature stable for future)
+    if not _NAME_RE.match(app_name):
+        raise ValueError("app_name must match [A-Za-z0-9_]+ (no dots, slashes, or hyphens).")
+
     options = options or ServerBuildOptions()
 
-    out_dir = Path(work_dir).expanduser().resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
+    project_root = Path(project_dir).expanduser().resolve()
+    project_root.mkdir(parents=True, exist_ok=True)
 
-    pages_dir = out_dir / "pages"
-    templates_dir = out_dir / "templates"
-    static_dir = out_dir / "static"
+    app_root = project_root / app_name
+    if app_root.exists():
+        # refuse overwrite (both file and dir)
+        raise FileExistsError(f"Target app already exists: {app_root}")
+    app_root.mkdir(parents=True, exist_ok=False)
 
-    # Make sure we don't accidentally overwrite a project
-    for d in (pages_dir, templates_dir, static_dir):
-        if d.exists():
-            raise FileExistsError(f"Already exists: {d}")
+    # refuse generating into a non-empty directory (extra safety)
+    if any(app_root.iterdir()):
+        raise FileExistsError(f"Target app directory is not empty: {app_root}")
+
+    pages_dir = app_root / "pages"
+    templates_dir = app_root / "templates"
+    static_dir = app_root / "static"
 
     pages_dir.mkdir()
     templates_dir.mkdir()
@@ -79,21 +114,34 @@ def server(work_dir: str | Path, name: str, *, options: ServerBuildOptions | Non
 
     # ---- Copy app files ----
     app_pkg = "nexom.assets.app"
-    for fn in ("gunicorn.conf.py", "router.py", "wsgi.py", "config.py"):
-        _copy_from_package(app_pkg, fn, out_dir / fn)
+    for fn in ("__init__.py", "gunicorn.conf.py", "router.py", "wsgi.py", "config.py"):
+        _copy_from_package(app_pkg, fn, app_root / fn)
 
-    # ---- Enable settings (format config.py) ----
-    config_path = out_dir / "config.py"
+    # ---- Enable settings (replace config.py) ----
+    config_path = app_root / "config.py"
     config_text = config_path.read_text(encoding="utf-8")
-
-    # NOTE: pwd_dir should be the generated project directory, not current cwd.
-    enabled = config_text.format(
-        pwd_dir=str(out_dir),
-        g_address=options.address,
-        g_port=options.port,
-        g_workers=options.workers,
-        g_reload=options.reload,
+    config_enabled = _replace_many(
+        config_text,
+        {
+            "__pwd_dir__": str(app_root),
+            "__g_address__": options.address,
+            "__g_port__": str(options.port),
+            "__g_workers__": str(options.workers),
+            "__g_reload__": "True" if options.reload else "False",
+        },
     )
-    config_path.write_text(enabled, encoding="utf-8")
+    config_path.write_text(config_enabled, encoding="utf-8")
 
-    return out_dir
+    # ---- Enable settings (replace gunicorn.conf.py) ----
+    gunicorn_conf_path = app_root / "gunicorn.conf.py"
+    gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
+    gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": app_name})
+    gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    # ---- Enable settings (replace pages/_templates.py) ----
+    pages_templates_path = pages_dir / "_templates.py"
+    pages_templates_text = pages_templates_path.read_text(encoding="utf-8")
+    pages_templates_enabled = _replace_many(pages_templates_text, {"__app_name__": app_name})
+    pages_templates_path.write_text(pages_templates_enabled, encoding="utf-8")
+
+    return app_root
