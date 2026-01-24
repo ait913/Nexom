@@ -8,17 +8,17 @@ Nexomは短いコードで最低限動作し、シンプルで理解のしやす
 ## はじめる
 最初のサーバーを起動するには、3つの手順が必要です。
 
-1. ディレクトリを作成
-2. nexomをpipでインストール、サーバーのビルド
+1. プロジェクトディレクトリを作成
+2. nexomをpipでインストール、アプリのビルド
 3. 起動
 
-### 1.ディレクトリの作成
+### 1.プロジェクトディレクトリの作成
 **準備**
 
 用意していない場合はディレクトリを作成し、仮想環境も準備してください
 ```
-mkdir sample
-cd sample
+mkdir banana_project
+cd banana_project
 
 python -m venv venv
 source venv/bin/activate
@@ -30,19 +30,19 @@ nexomをインストールします。
 
 ※まだベータ版のため、最新のバージョンを確認してください。
 ```
-pip install nexom==0.1.4
+pip install nexom==0.1.5
 ```
-**テンプレートサーバーのビルド**
+**テンプレートアプリのビルド**
 
-サーバーを置きたいディレクトリ上で、以下のコマンドを実行してください(名前のsampleは自由)
+プロジェクトディレクトリ上で、以下のコマンドを実行してください(名前は自由)
 ```
-python -m nexom build-server sample
+python -m nexom create-app sample(名前)
 ```
 
 ### 3.起動
 以下のコマンドを起動します。
 ```
-gunicorn wsgi:app
+gunicorn sample.wsgi:app --config sample.gunicorn.conf.py
 ```
 ブラウザからアクセスできるようになります。
 デフォルトのポートは8080です。
@@ -68,8 +68,8 @@ server {
 
 ## Systemdに登録して自動起動する
 **Ubuntuの場合**
-1. `/etc/systemd/system` に、 `your_server_name.service` を作成します。
-2. `your_server_name.service` に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)
+1. `/etc/systemd/system` に、 `banana_sample.service` を作成します。
+2. `banana_sample.service` に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)
 
 サーバーのディレクトリが `/home/ubuntu/nexom` にある場合
 ```
@@ -80,9 +80,11 @@ After=network.target
 [Service]
 User=www-data
 Group=www-data
-WorkingDirectory=/home/ubuntu/nexom
-Environment="/home/ubuntu/nexom/venv/bin"
-ExecStart=/home/ubuntu/nexom/venv/bin/gunicorn wsgi:app
+WorkingDirectory=/home/ubuntu/banana_project
+Environment="PYTHONPATH=/home/ubuntu/banana_project"
+ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn sample.wsgi:app --config sample/gunicorn.conf.py
+Restart=always
+RestartSec=3
 [Install]
 WantedBy=multi-user.target
 ```
@@ -90,23 +92,12 @@ WantedBy=multi-user.target
 以下のコマンドを実行します
 ```
 sudo systemd daemon-reload
-sudo systemd enable your_server_name
-sudo systemd start your_server_name
+sudo systemd enable banana_sample
+sudo systemd start banana_sample
 ```
 
 ### テンプレートユニットを活用して複数のサーバーを効率的に管理
-以下の構成でサーバーが建てられていたとします。
-```
-/home/ubuntu/BananaProject/
-└─ web/
-   ├─ banana1 (Nexomサーバー)/
-   │  └─ wsgi.py
-   ├─ banana2 (Nexomサーバー)/
-   │  └─ wsgi.py
-   └─ banana3 (Nexomサーバー)/
-      └─ wsgi.py
-```
-この構成の場合、テンプレートユニットを活用し .service ファイルを一枚にまとめられます。
+_テンプレートユニットを活用し .service ファイルを一枚にまとめられます。
 
 `/etc/systemd/system/banana-project@.service`
 ```
@@ -117,9 +108,11 @@ After=network.target
 [Service]
 User=www-data
 Group=www-data
-WorkingDirectory=/home/ubuntu/BananaProject/web/%i
-Environment="/home/ubuntu/BananaProject/web/%i/venv/bin"
-ExecStart=/home/ubuntu/BananaProject/web/%i/venv/bin/gunicorn wsgi:app
+WorkingDirectory=/home/ubuntu/banana_project
+Environment="PYTHONPATH=/home/ubuntu/banana_project"
+ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn ％iwsgi:app --config %i/gunicorn.conf.py
+Restart=always
+RestartSec=3
 [Install]
 WantedBy=multi-user.target
 ```
@@ -135,4 +128,4 @@ sudo systemd start banana-project@banana2
 sudo systemd start banana-project@banana3
 ```
 
-2026 1/24
+2026 1/25
