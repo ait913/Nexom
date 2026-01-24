@@ -96,8 +96,8 @@ sudo systemd enable banana_sample
 sudo systemd start banana_sample
 ```
 
-### テンプレートユニットを活用して複数のサーバーを効率的に管理
-_テンプレートユニットを活用し .service ファイルを一枚にまとめられます。
+### テンプレートユニットを活用して複数のアプリを効率的に管理
+テンプレートユニットを活用し .service ファイルを一枚にまとめられます。
 
 `/etc/systemd/system/banana-project@.service`
 ```
