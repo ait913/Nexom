@@ -150,5 +150,22 @@ class ObjectHTMLImportError(NexomError):
 
 
 # =========================
-# Auth
+# DatabaseManager
 # =========================
+class DBMConnectionInvalidError(NexomError):
+    """Raised when an udbm connection is invalid."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "DBM01",
+            f"DBM connection is invalid.",
+        )
+
+class DBError(NexomError):
+    """Raised when an udbm connection is invalid."""
+
+    def __init__(self, message) -> None:
+        super().__init__(
+            "DBM02",
+            f"DBM connection is invalid. -> {message}",
+        )
