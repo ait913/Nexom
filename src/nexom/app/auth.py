@@ -6,6 +6,9 @@ import secrets
 import time
 import hashlib
 import hmac
+import json
+from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import URLError, HTTPError
 
 from .request import Request
 from .response import JsonResponse
@@ -174,7 +177,9 @@ class AuthService:
 # AuthVerify (service-facing)
 # --------------------
 
-class AuthVerify:
+class AuthVerifyLocal:
+    """Verify using a local AuthDBM instance (same process)."""
+
     def __init__(self, dbm: "AuthDBM") -> None:
         self.dbm = dbm
 
@@ -184,6 +189,77 @@ class AuthVerify:
 
     def verify_token(self, token: str) -> Session | None:
         return self.dbm.verify(token)
+
+
+class AuthVerify:
+    """Verify by calling the Auth Service over HTTP(S)."""
+
+    def __init__(
+        self,
+        auth_url: str,
+        *,
+        cookie_name: str = AuthService.COOKIE_NAME,
+        timeout: float = 3.0,
+        verify_path: str = "/verify",
+    ) -> None:
+        self.auth_url = auth_url.rstrip("/")
+        self.cookie_name = cookie_name
+        self.timeout = timeout
+        self.verify_url = f"{self.auth_url}{verify_path}"
+
+    def _extract_token(self, req: Request) -> str | None:
+        #　Cookie
+        if req.cookie:
+            # RequestCookies.get() already handles default
+            token = req.cookie.get(self.cookie_name)  # type: ignore[attr-defined]
+            if token:
+                return token
+
+        return None
+
+    def verify_request(self, req: Request) -> Session | None:
+        token = self._extract_token(req)
+        if not token:
+            return None
+        return self.verify_token(token)
+
+    def verify_token(self, token: str) -> Session | None:
+        if not token:
+            return None
+
+        payload = json.dumps({"token": token}, ensure_ascii=False).encode("utf-8")
+        http_req = UrlRequest(
+            self.verify_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urlopen(http_req, timeout=self.timeout) as resp:
+                body = resp.read()
+        except (HTTPError, URLError):
+            # auth service unreachable or returned non-2xx
+            raise AuthTokenInvalidError()
+
+        try:
+            data = json.loads(body.decode("utf-8"))
+        except Exception:
+            raise AuthTokenInvalidError()
+
+        if not data.get("active"):
+            return None
+
+        uid = data.get("uid")
+        exp = data.get("expires_at")
+        if not isinstance(uid, str) or not isinstance(exp, int):
+            raise AuthTokenInvalidError()
+
+        # sid/user_agent are not provided by verify endpoint; keep minimal.
+        return Session(sid="", uid=uid, token=token, expires_at=exp, revoked_at=None, user_agent=None)
 
 
 # --------------------
