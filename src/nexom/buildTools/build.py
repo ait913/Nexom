@@ -53,7 +53,7 @@ def create_app(
 ) -> Path:
     """
     Generate a Nexom server app under:
-        <project_dir>/apps/<app_name>/
+        <project_dir>/<app_name>/
 
     The generated directory includes:
         pages/, templates/, static/, config.py, gunicorn.conf.py, router.py, wsgi.py
@@ -64,7 +64,7 @@ def create_app(
         options: Defaults for generated config.py values.
 
     Returns:
-        Absolute path to the generated app directory (<project_dir>/apps/<app_name>).
+        Absolute path to the generated app directory (<project_dir>/<app_name>).
 
     Raises:
         ValueError: If app_name is invalid.
@@ -144,5 +144,56 @@ def create_app(
     pages_templates_text = pages_templates_path.read_text(encoding="utf-8")
     pages_templates_enabled = _replace_many(pages_templates_text, {"__app_name__": app_name})
     pages_templates_path.write_text(pages_templates_enabled, encoding="utf-8")
+
+    return app_root
+
+def create_auth(
+    project_dir: str | Path,
+    *,
+    options: AppBuildOptions | None = None,
+) -> Path:
+    """
+    Generate a Nexom auth server app under:
+        <project_dir>/auth/
+    """
+    options = options or AppBuildOptions(port=7070)  # authのデフォルトだけ変える
+
+    project_root = Path(project_dir).expanduser().resolve()
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    app_root = project_root / "auth"
+    if app_root.exists():
+        raise FileExistsError(f"Target app already exists: {app_root}")
+    app_root.mkdir(parents=True, exist_ok=False)
+
+    if any(app_root.iterdir()):
+        raise FileExistsError(f"Target app directory is not empty: {app_root}")
+
+    # ---- Copy app files ----
+    app_pkg = "nexom.assets.auth"
+    for fn in ("__init__.py", "gunicorn.conf.py", "wsgi.py", "config.py"):
+        _copy_from_package(app_pkg, fn, app_root / fn)
+
+    # ---- Enable settings (replace config.py) ----
+    config_path = app_root / "config.py"
+    config_text = config_path.read_text(encoding="utf-8")
+    config_enabled = _replace_many(
+        config_text,
+        {
+            "__prj_dir__": str(project_root),
+            "__app_dir__": str(app_root),
+            "__g_address__": options.address,
+            "__g_port__": str(options.port),
+            "__g_workers__": str(options.workers),
+            "__g_reload__": "True" if options.reload else "False",
+        },
+    )
+    config_path.write_text(config_enabled, encoding="utf-8")
+
+    # ---- Enable settings (replace gunicorn.conf.py) ----
+    gunicorn_conf_path = app_root / "gunicorn.conf.py"
+    gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
+    gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": "auth"})
+    gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
 
     return app_root

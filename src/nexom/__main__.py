@@ -4,8 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from nexom.buildTools.build import create_app
-from nexom.buildTools.build import AppBuildOptions
+from nexom.buildTools.build import create_app, create_auth, AppBuildOptions
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -17,6 +16,21 @@ def main(argv: list[str] | None = None) -> None:
 
     # test
     subparsers.add_parser("test", help="Test Nexom installation")
+
+    # create-auth
+    pa = subparsers.add_parser(
+        "create-auth",
+        help="Create a Nexom auth app project",
+    )
+    pa.add_argument(
+        "--out",
+        default=".",
+        help="Output directory (default: current directory)",
+    )
+    pa.add_argument("--address", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    pa.add_argument("--port", type=int, default=7070, help="Bind port (default: 7070)")
+    pa.add_argument("--workers", type=int, default=4, help="Gunicorn workers (default: 4)")
+    pa.add_argument("--reload", action="store_true", help="Enable auto-reload (development)")
 
     # create-app
     p = subparsers.add_parser(
@@ -49,6 +63,17 @@ def main(argv: list[str] | None = None) -> None:
         )
         out_dir = create_app(Path(args.out), args.app_name, options=options)
         print(f"Created Nexom app project at: {out_dir}")
+        return
+
+    if args.command == "create-auth":
+        options = AppBuildOptions(
+            address=args.address,
+            port=args.port,
+            workers=args.workers,
+            reload=args.reload,
+        )
+        out_dir = create_auth(Path(args.out), options=options)
+        print(f"Created Nexom auth app project at: {out_dir}")
         return
 
 
