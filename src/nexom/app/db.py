@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable
 from sqlite3 import connect, Connection, Cursor, Error
 
 from ..core.error import DBMConnectionInvalidError, DBError
@@ -25,7 +25,16 @@ class DatabaseManager:
         self._conn = connect(self.db_file)
         self._cursor = self._conn.cursor()
 
+        # ---- SQLite safety / performance defaults ----
+        # foreign keys are OFF by default in SQLite
         self._cursor.execute("PRAGMA foreign_keys = ON")
+        # better concurrency
+        self._cursor.execute("PRAGMA journal_mode = WAL")
+        # avoid immediate 'database is locked'
+        self._cursor.execute("PRAGMA busy_timeout = 3000")
+        # reasonable durability vs speed (WAL推奨とセット)
+        self._cursor.execute("PRAGMA synchronous = NORMAL")
+
         self.commit()
 
     def rip_connection(self) -> None:
@@ -38,10 +47,11 @@ class DatabaseManager:
     def commit(self) -> None:
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
-        
         self._conn.commit()
 
-    def excute(self, sql: str, *args: Any) -> list[tuple] | None:
+    # ---- new canonical names ----
+
+    def execute(self, sql: str, *args: Any) -> list[tuple] | None:
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
 
@@ -58,7 +68,7 @@ class DatabaseManager:
             self._conn.rollback()
             raise DBError(str(e))
 
-    def excute_many(self, *sql_inserts: tuple[str, tuple]) -> None:
+    def execute_many(self, sql_inserts: Iterable[tuple[str, tuple]]) -> None:
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
 

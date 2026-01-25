@@ -196,7 +196,7 @@ class AuthDBM(DatabaseManager):
         # NOTE:
         # 既存DBが token カラムのままだと CREATE TABLE は更新されない。
         # 途中から token_hash 化するなら migration が必要。
-        self.excute_many(
+        self.execute_many(
             (
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -238,13 +238,13 @@ class AuthDBM(DatabaseManager):
         pw_hash = _hash_password(password, salt)
         uid = _rand()
 
-        self.excute(
+        self.execute(
             "INSERT INTO users(uid, user_id, public_name, password_hash, password_salt) VALUES(?,?,?,?,?)",
             uid, user_id, public_name, pw_hash, salt
         )
 
     def login(self, user_id: str, password: str, *, user_agent: str | None, ttl_sec: int) -> Session:
-        rows = self.excute(
+        rows = self.execute(
             "SELECT uid, password_hash, password_salt, is_active FROM users WHERE user_id = ?",
             user_id
         )
@@ -262,7 +262,7 @@ class AuthDBM(DatabaseManager):
         token = _rand()
         expires = _now() + ttl_sec
 
-        self.excute(
+        self.execute(
             "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
             sid, uid, _token_hash(token), expires, None, user_agent
         )
@@ -270,7 +270,7 @@ class AuthDBM(DatabaseManager):
         return Session(sid, uid, token, expires, None, user_agent)
 
     def logout(self, token: str) -> None:
-        self.excute(
+        self.execute(
             "UPDATE sessions SET revoked_at = ? WHERE token_hash = ?",
             _now(), _token_hash(token)
         )
@@ -279,7 +279,7 @@ class AuthDBM(DatabaseManager):
         if not token:
             return None
 
-        rows = self.excute(
+        rows = self.execute(
             "SELECT sid, uid, token_hash, expires_at, revoked_at, user_agent FROM sessions WHERE token_hash = ?",
             _token_hash(token)
         )

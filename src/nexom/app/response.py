@@ -49,6 +49,11 @@ class Response:
         if cookie:
             self.headers.append(("Set-Cookie", cookie))
 
+        # ---- auto Content-Length (if not already present) ----
+        has_len = any(k.lower() == "content-length" for k, _ in self.headers)
+        if not has_len and isinstance(self.body, (bytes, bytearray)):
+            self.headers.append(("Content-Length", str(len(self.body))))
+
     def __iter__(self):
         """
         Allow Response to be returned directly from WSGI apps.
