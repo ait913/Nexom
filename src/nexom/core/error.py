@@ -169,3 +169,30 @@ class DBError(NexomError):
             "DBM02",
             f"DBM connection is invalid. -> {message}",
         )
+
+# =========================
+# Auth
+# =========================
+
+class AuthMissingFieldError(NexomError):
+    """Raised when required auth fields are missing."""
+    def __init__(self, key: str) -> None:
+        super().__init__("A01", f"Missing field. '{key}'")
+
+
+class AuthInvalidCredentialsError(NexomError):
+    """Raised when user_id or password is invalid."""
+    def __init__(self) -> None:
+        super().__init__("A02", "Invalid credentials.")
+
+
+class AuthUserDisabledError(NexomError):
+    """Raised when the user is inactive/disabled."""
+    def __init__(self) -> None:
+        super().__init__("A03", "This user is disabled.")
+
+
+class AuthTokenInvalidError(NexomError):
+    """Raised when token is missing/invalid/expired/revoked."""
+    def __init__(self) -> None:
+        super().__init__("A04", "This token is invalid.")
