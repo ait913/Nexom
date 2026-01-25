@@ -69,5 +69,7 @@ class RequestCookies(dict[str, str | None]):
         super().__init__(kwargs)
         self.default: str | None = None
 
-    def get(self, key: str) -> str | None:
-        return super().get(key, self.default)
+    def get(self, key: str, default: str | None = None) -> str | None:
+        if default is None:
+            default = self.default
+        return super().get(key, default)
