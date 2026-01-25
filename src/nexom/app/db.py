@@ -25,12 +25,21 @@ class DatabaseManager:
         self._conn = connect(self.db_file)
         self._cursor = self._conn.cursor()
 
+        self._cursor.execute("PRAGMA foreign_keys = ON")
+        self.commit()
+
     def rip_connection(self) -> None:
         if self._conn is None:
             raise DBMConnectionInvalidError()
         self._conn.close()
         self._conn = None
         self._cursor = None
+
+    def commit(self) -> None:
+        if self._conn is None or self._cursor is None:
+            raise DBMConnectionInvalidError()
+        
+        self._conn.commit()
 
     def excute(self, sql: str, *args: Any) -> list[tuple] | None:
         if self._conn is None or self._cursor is None:

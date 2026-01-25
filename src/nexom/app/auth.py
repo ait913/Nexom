@@ -12,6 +12,7 @@ from .response import JsonResponse
 from .db import DatabaseManager
 from .path import Path, Pathlib
 from .cookie import Cookie
+from .user import User
 
 from ..core.error import (
     NexomError,
@@ -59,16 +60,6 @@ def _parse_bearer(value: str | None) -> str | None:
 # --------------------
 # models
 # --------------------
-
-@dataclass
-class User:
-    uid: str
-    user_id: str
-    public_name: str
-    password_hash: str
-    password_salt: str
-    is_active: int
-
 
 @dataclass
 class Session:
