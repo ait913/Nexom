@@ -4,8 +4,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from nexom.buildTools.build import server as build_app
-from nexom.buildTools.build import ServerBuildOptions
+from nexom.buildTools.build import create_app
+from nexom.buildTools.build import AppBuildOptions
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -41,13 +41,13 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "create-app":
-        options = ServerBuildOptions(
+        options = AppBuildOptions(
             address=args.address,
             port=args.port,
             workers=args.workers,
             reload=args.reload,
         )
-        out_dir = build_app(Path(args.out), args.app_name, options=options)
+        out_dir = create_app(Path(args.out), args.app_name, options=options)
         print(f"Created Nexom app project at: {out_dir}")
         return
 

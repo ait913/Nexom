@@ -8,7 +8,7 @@ import shutil
 
 
 @dataclass(frozen=True)
-class ServerBuildOptions:
+class AppBuildOptions:
     """Options used to fill generated config.py."""
     address: str = "0.0.0.0"
     port: int = 8080
@@ -19,7 +19,7 @@ class ServerBuildOptions:
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
-class ServerBuildError(RuntimeError):
+class AppBuildError(RuntimeError):
     """Raised when project generation fails for any reason."""
 
 
@@ -41,15 +41,15 @@ def _replace_many(text: str, repl: dict[str, str]) -> str:
     # Placeholder leak detection (generic message; detailed info should be logged elsewhere)
     unresolved = [k for k in repl.keys() if k in out]
     if unresolved:
-        raise ServerBuildError("Build template placeholder was not resolved.")
+        raise AppBuildError("Build template placeholder was not resolved.")
     return out
 
 
-def server(
+def create_app(
     project_dir: str | Path,
     app_name: str,
     *,
-    options: ServerBuildOptions | None = None,
+    options: AppBuildOptions | None = None,
 ) -> Path:
     """
     Generate a Nexom server app under:
@@ -69,12 +69,12 @@ def server(
     Raises:
         ValueError: If app_name is invalid.
         FileExistsError: If target app directory already exists (or is non-empty).
-        ServerBuildError: If bundled assets are missing or placeholders cannot be resolved.
+        AppBuildError: If bundled assets are missing or placeholders cannot be resolved.
     """
     if not _NAME_RE.match(app_name):
         raise ValueError("app_name must match [A-Za-z0-9_]+ (no dots, slashes, or hyphens).")
 
-    options = options or ServerBuildOptions()
+    options = options or AppBuildOptions()
 
     project_root = Path(project_dir).expanduser().resolve()
     project_root.mkdir(parents=True, exist_ok=True)
@@ -123,7 +123,8 @@ def server(
     config_enabled = _replace_many(
         config_text,
         {
-            "__pwd_dir__": str(app_root),
+            "__prj_dir__": str(project_root),
+            "__app_dir__": str(app_root),
             "__g_address__": options.address,
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
