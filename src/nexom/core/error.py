@@ -147,3 +147,8 @@ class ObjectHTMLImportError(NexomError):
             "OH03",
             f"This import is invalid. '{name}'",
         )
+
+
+# =========================
+# Auth
+# =========================
