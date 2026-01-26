@@ -17,12 +17,24 @@ from .response import Response, JsonResponse
 from .middleware import Middleware, MiddlewareChain, Handler
 
 
+# ====================
+# Path (base)
+# ====================
+
 class Path:
     """Represents a route with optional path arguments and its handler."""
 
-    def __init__(self, path: str, handler: Handler, name: str):
+    def __init__(
+        self,
+        path: str,
+        handler: Handler,
+        name: str,
+        *,
+        methods: set[str] | None = None,   # None = any method
+    ):
         self.handler = handler
         self.name: str = name
+        self.methods: set[str] | None = {m.upper() for m in methods} if methods else None
 
         path_segments = path.strip("/").split("/") if path.strip("/") else [""]
         self.path_args: dict[int, str] = {}
@@ -35,8 +47,8 @@ class Path:
                     detection_index = idx
                 self.path_args[idx] = m.group(1)
 
-        if idx == len(path_segments) - 1 and detection_index == 0:
-            detection_index = idx + 1
+        if detection_index == 0:
+            detection_index = len(path_segments)
 
         self.path: str = "/".join(path_segments[:detection_index])
         self.detection_range: int = detection_index
@@ -49,7 +61,11 @@ class Path:
             args[arg_name] = segments[idx] if idx < len(segments) else None
         return args
 
-    def call_handler(self, request: Request, middlewares: tuple[Middleware, ...] = ()) -> Response:
+    def call_handler(
+        self,
+        request: Request,
+        middlewares: tuple[Middleware, ...] = (),
+    ) -> Response:
         try:
             args = self._read_args(request.path)
 
@@ -74,11 +90,28 @@ class Path:
             raise
 
 
+# ====================
+# Method specific paths
+# ====================
+
+class Get(Path):
+    def __init__(self, path: str, handler: Handler, name: str):
+        super().__init__(path, handler, name, methods={"GET"})
+
+
+class Post(Path):
+    def __init__(self, path: str, handler: Handler, name: str):
+        super().__init__(path, handler, name, methods={"POST"})
+
+
+# ====================
+# Static files
+# ====================
+
 class Static(Path):
     """Represents a static file route."""
 
     def __init__(self, path: str, static_directory: str, name: str) -> None:
-        # resolve() ベースでパストラバーサルを堅くする
         self._root = _Path(static_directory).resolve()
         super().__init__(path, self._access, name)
 
@@ -87,7 +120,6 @@ class Static(Path):
         relative_parts = segments[self.detection_range :] if len(segments) > self.detection_range else []
         rel = _Path(*relative_parts) if relative_parts else _Path("")
 
-        # root / rel を resolve して root 配下か検証
         try:
             target = (self._root / rel).resolve()
         except Exception:
@@ -112,6 +144,10 @@ class Static(Path):
         return Response(data, headers=headers)
 
 
+# ====================
+# Pathlib
+# ====================
+
 class Pathlib(list[Path]):
     """Collection of Path objects with middleware support."""
 
@@ -130,12 +166,29 @@ class Pathlib(list[Path]):
     def add_middleware(self, *middlewares: Middleware) -> None:
         self.middlewares.extend(middlewares)
 
-    def get(self, request_path: str) -> Path | None:
+    def get(self, request_path: str, *, method: str | None = None) -> Path | None:
         segments = request_path.rstrip("/").split("/")
+        method_u = method.upper() if method else None
+
+        fallback: Path | None = None
+
         for p in self:
             detection_path = "/".join(segments[: p.detection_range])
-            if detection_path == p.path:
-                return p
+            if detection_path != p.path:
+                continue
+
+            # Method-specific Path has priority
+            if method_u and p.methods is not None:
+                if method_u in p.methods:
+                    return p
+                continue
+
+            # Method-agnostic Path as fallback
+            if fallback is None:
+                fallback = p
+
+        if fallback is not None:
+            return fallback
 
         if self.raise_if_not_exist:
             raise PathNotFoundError(request_path)

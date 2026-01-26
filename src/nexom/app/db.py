@@ -19,6 +19,7 @@ class DatabaseManager:
 
     def _init(self) -> None:
         "for override"
+        ...
 
     def start_connection(self, auto_commit: bool = True) -> None:
         try:

@@ -26,6 +26,6 @@ class User:
 # --------------------
 
 class UserDatabaseManager(DatabaseManager):
-    def __init__(self, users_dir:str, user: User, auto_commit = True):
+    def __init__(self, users_dir:str, user: User, auto_commit: bool = True):
         db_file = str(plb.Path(users_dir) / f"{user.uid}.db")
         super().__init__(db_file, auto_commit)

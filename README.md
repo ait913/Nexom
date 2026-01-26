@@ -27,10 +27,8 @@ source venv/bin/activate
 **インストール**
 
 nexomをインストールします。
-
-※まだベータ版のため、最新のバージョンを確認してください。
 ```
-pip install nexom==0.1.5
+pip install
 ```
 **テンプレートアプリのビルド**
 
@@ -51,81 +49,3 @@ gunicorn sample.wsgi:app --config sample.gunicorn.conf.py
 
 ポートなどの設定は `config.py` から変更してください。
 
-## Nginx等使用して外部公開する
-`config.py` で指定したポートにプロキシしてください。
-```
-server {
-    listen 443 ssl;
-        server_name nexom.aisaba.net;
-
-        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-        location / {
-                proxy_pass http://localhost:8080;
-        }
-}
-```
-
-## Systemdに登録して自動起動する
-**Ubuntuの場合**
-1. `/etc/systemd/system` に、 `banana_sample.service` を作成します。
-2. `banana_sample.service` に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)
-
-サーバーのディレクトリが `/home/ubuntu/nexom` にある場合
-```
-[Unit]
-Description=Nexom Web Freamework
-After=network.target
-
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/home/ubuntu/banana_project
-Environment="PYTHONPATH=/home/ubuntu/banana_project"
-ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn sample.wsgi:app --config sample/gunicorn.conf.py
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-```
-
-以下のコマンドを実行します
-```
-sudo systemd daemon-reload
-sudo systemd enable banana_sample
-sudo systemd start banana_sample
-```
-
-### テンプレートユニットを活用して複数のアプリを効率的に管理
-テンプレートユニットを活用し .service ファイルを一枚にまとめられます。
-
-`/etc/systemd/system/banana-project@.service`
-```
-[Unit]
-Description=Nexom Web Server (%i)
-After=network.target
-
-[Service]
-User=www-data
-Group=www-data
-WorkingDirectory=/home/ubuntu/banana_project
-Environment="PYTHONPATH=/home/ubuntu/banana_project"
-ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn ％iwsgi:app --config %i/gunicorn.conf.py
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-```
-```
-sudo systemd daemon-reload
-
-sudo systemd enable banana-project@banana1
-sudo systemd enable banana-project@banana2
-sudo systemd enable banana-project@banana3
-
-sudo systemd start banana-project@banana1
-sudo systemd start banana-project@banana2
-sudo systemd start banana-project@banana3
-```
-
-2026 1/25
