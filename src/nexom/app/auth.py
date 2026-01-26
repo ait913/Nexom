@@ -28,33 +28,26 @@ from ..core.error import (
 # utils
 # --------------------
 
-
 def _now() -> int:
     return int(time.time())
-
 
 def _rand(nbytes: int = 24) -> str:
     return secrets.token_urlsafe(nbytes)
 
-
 def _make_salt(nbytes: int = 16) -> str:
     return secrets.token_hex(nbytes)
-
 
 def _hash_password(password: str, salt_hex: str) -> str:
     salt = bytes.fromhex(salt_hex)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 200_000)
     return dk.hex()
 
-
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
 
 # --------------------
 # models (internal)
 # --------------------
-
 
 @dataclass
 class Session:
@@ -66,19 +59,13 @@ class Session:
     revoked_at: int | None
     user_agent: str | None
 
-
 # --------------------
-# AuthService (API-only)
+# AuthService (API only)
 # --------------------
-
 
 class AuthService:
     """
-    Auth API service (service-to-service / JS client).
-
-    IMPORTANT:
-    - HTTP JSON must NOT include uid.
-    - user identification for external use is user_id.
+    Auth API service (JSON only).
     """
 
     def __init__(self, db_path: str, *, ttl_sec: int = 60 * 60 * 24 * 7, prefix: str = "") -> None:
@@ -86,7 +73,6 @@ class AuthService:
         self.ttl_sec = ttl_sec
 
         p = prefix.strip("/")
-
         def _p(x: str) -> str:
             return f"{p}/{x}".strip("/") if p else x
 
@@ -102,214 +88,155 @@ class AuthService:
         try:
             route = self.routing.get(req.path)
             return route.call_handler(req)
-
         except NexomError as e:
-            return JsonResponse({"error": e.code}, status=400)
-
+            return JsonResponse({"ok": False, "error": e.code}, status=400)
         except Exception:
-            return JsonResponse({"error": "Internal Server Error"}, status=500)
+            return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
 
-    # ---- handlers (Pathlib signature) ----
+    # ---- handlers ----
 
     def signup(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
         if request.method != "POST":
-            return JsonResponse({"error": "Method Not Allowed"}, status=405)
+            return JsonResponse({"ok": False}, status=405)
 
         data = request.json() or {}
-        user_id = str(data.get("user_id") or "").strip()
-        public_name = str(data.get("public_name") or "").strip()
-        password = str(data.get("password") or "")
-
-        self.dbm.signup(user_id=user_id, public_name=public_name, password=password)
+        self.dbm.signup(
+            user_id=str(data.get("user_id") or "").strip(),
+            public_name=str(data.get("public_name") or "").strip(),
+            password=str(data.get("password") or ""),
+        )
         return JsonResponse({"ok": True}, status=201)
 
     def login(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
         if request.method != "POST":
-            return JsonResponse({"error": "Method Not Allowed"}, status=405)
+            return JsonResponse({"ok": False}, status=405)
 
         data = request.json() or {}
-        user_id = str(data.get("user_id") or "").strip()
-        password = str(data.get("password") or "")
-
         sess = self.dbm.login(
-            user_id,
-            password,
+            str(data.get("user_id") or "").strip(),
+            str(data.get("password") or ""),
             user_agent=request.headers.get("user-agent"),
             ttl_sec=self.ttl_sec,
         )
 
-        # uid は返さない
-        return JsonResponse(
-            {
-                "ok": True,
-                "user_id": sess.user_id,
-                "token": sess.token,
-                "expires_at": sess.expires_at,
-            }
-        )
+        return JsonResponse({
+            "ok": True,
+            "user_id": sess.user_id,
+            "token": sess.token,
+            "expires_at": sess.expires_at,
+        })
 
     def logout(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
         if request.method != "POST":
-            return JsonResponse({"error": "Method Not Allowed"}, status=405)
+            return JsonResponse({"ok": False}, status=405)
 
-        data = request.json() or {}
-        token = str(data.get("token") or "").strip()
+        token = str((request.json() or {}).get("token") or "")
         if token:
             self.dbm.logout(token)
-
         return JsonResponse({"ok": True})
 
     def verify(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
         if request.method != "POST":
-            return JsonResponse({"error": "Method Not Allowed"}, status=405)
+            return JsonResponse({"ok": False}, status=405)
 
-        data = request.json() or {}
-        token = str(data.get("token") or "").strip()
-
+        token = str((request.json() or {}).get("token") or "")
         sess = self.dbm.verify(token)
         if not sess:
             return JsonResponse({"active": False})
 
-        # uid は返さない
-        return JsonResponse({"active": True, "user_id": sess.user_id, "expires_at": sess.expires_at})
-
+        return JsonResponse({
+            "active": True,
+            "user_id": sess.user_id,
+            "expires_at": sess.expires_at,
+        })
 
 # --------------------
-# AuthClient (HTTP)
+# AuthClient (App側)
 # --------------------
-
 
 class AuthClient:
-    """Call the AuthService over HTTP(S) from an app/service."""
+    """AuthService を HTTP で叩くクライアント"""
 
-    def __init__(
-        self,
-        auth_url: str,
-        *,
-        timeout: float = 3.0,
-        signup_path: str = "/signup",
-        login_path: str = "/login",
-        logout_path: str = "/logout",
-        verify_path: str = "/verify",
-    ) -> None:
+    def __init__(self, auth_url: str, *, timeout: float = 3.0) -> None:
         base = auth_url.rstrip("/")
-        self._signup_url = f"{base}{signup_path}"
-        self._login_url = f"{base}{login_path}"
-        self._logout_url = f"{base}{logout_path}"
-        self._verify_url = f"{base}{verify_path}"
+        self.signup_url = base + "/signup"
+        self.login_url = base + "/login"
+        self.logout_url = base + "/logout"
+        self.verify_url = base + "/verify"
         self.timeout = timeout
 
-    def _post_json(self, url: str, body: dict) -> dict:
-        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    def _post(self, url: str, body: dict) -> dict:
+        payload = json.dumps(body).encode("utf-8")
         req = UrlRequest(
             url,
             data=payload,
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "Accept": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
-
         try:
-            with urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read()
-        except (HTTPError, URLError) as _:
+            with urlopen(req, timeout=self.timeout) as r:
+                data = json.loads(r.read().decode("utf-8"))
+        except (HTTPError, URLError, json.JSONDecodeError):
             raise AuthTokenInvalidError()
-
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except Exception:
-            raise AuthTokenInvalidError()
-
-        if not isinstance(data, dict):
-            raise AuthTokenInvalidError()
-
-        if data.get("error"):
-            raise AuthTokenInvalidError()
-
         return data
 
     def signup(self, *, user_id: str, public_name: str, password: str) -> bool:
-        data = self._post_json(
-            self._signup_url,
-            {"user_id": user_id, "public_name": public_name, "password": password},
-        )
-        return bool(data.get("ok"))
+        return bool(self._post(self.signup_url, {
+            "user_id": user_id,
+            "public_name": public_name,
+            "password": password,
+        }).get("ok"))
 
     def login(self, *, user_id: str, password: str) -> tuple[str, str, int]:
-        """
-        Returns: (token, user_id, expires_at)
-        """
-        data = self._post_json(self._login_url, {"user_id": user_id, "password": password})
+        d = self._post(self.login_url, {"user_id": user_id, "password": password})
+        return d["token"], d["user_id"], d["expires_at"]
 
-        token = data.get("token")
-        uid_text = data.get("user_id")
-        exp = data.get("expires_at")
-
-        if not isinstance(token, str) or not isinstance(uid_text, str) or not isinstance(exp, int):
-            raise AuthTokenInvalidError()
-
-        return token, uid_text, exp
+    def verify_token(self, *, token: str) -> tuple[bool, Optional[str], Optional[int]]:
+        d = self._post(self.verify_url, {"token": token})
+        if not d.get("active"):
+            return False, None, None
+        return True, d["user_id"], d["expires_at"]
 
     def logout(self, *, token: str) -> bool:
-        data = self._post_json(self._logout_url, {"token": token})
-        return bool(data.get("ok"))
-
-    def verify_token(self, *, token: str) -> tuple[bool, str | None, int | None]:
-        """
-        Returns: (active, user_id, expires_at)
-        """
-        data = self._post_json(self._verify_url, {"token": token})
-
-        active = bool(data.get("active"))
-        if not active:
-            return False, None, None
-
-        user_id = data.get("user_id")
-        exp = data.get("expires_at")
-        if not isinstance(user_id, str) or not isinstance(exp, int):
-            raise AuthTokenInvalidError()
-
-        return True, user_id, exp
-
+        return bool(self._post(self.logout_url, {"token": token}).get("ok"))
 
 # --------------------
-# DB layer
+# DB
 # --------------------
-
 
 class AuthDBM(DatabaseManager):
     @override
     def _init(self) -> None:
         self.execute_many(
-            (
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                    uid TEXT PRIMARY KEY,
-                    user_id TEXT UNIQUE NOT NULL,
-                    public_name TEXT NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    password_salt TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_active INTEGER NOT NULL DEFAULT 1
-                );
-                """,
-                (),
-            ),
-            (
-                """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    sid TEXT PRIMARY KEY,
-                    uid TEXT NOT NULL REFERENCES users(uid),
-                    token_hash TEXT UNIQUE NOT NULL,
-                    expires_at INTEGER NOT NULL,
-                    revoked_at INTEGER,
-                    user_agent TEXT
-                );
-                """,
-                (),
-            ),
+            [
+                (
+                    """
+                    CREATE TABLE IF NOT EXISTS users (
+                        uid TEXT PRIMARY KEY,
+                        user_id TEXT UNIQUE NOT NULL,
+                        public_name TEXT NOT NULL,
+                        password_hash TEXT NOT NULL,
+                        password_salt TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        is_active INTEGER NOT NULL DEFAULT 1
+                    );
+                    """,
+                    (),
+                ),
+                (
+                    """
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        sid TEXT PRIMARY KEY,
+                        uid TEXT NOT NULL REFERENCES users(uid),
+                        token_hash TEXT UNIQUE NOT NULL,
+                        expires_at INTEGER NOT NULL,
+                        revoked_at INTEGER,
+                        user_agent TEXT
+                    );
+                    """,
+                    (),
+                )
+            ]
         )
 
     def signup(self, user_id: str, public_name: str, password: str) -> None:
@@ -321,52 +248,49 @@ class AuthDBM(DatabaseManager):
             raise AuthMissingFieldError("password")
 
         salt = _make_salt()
-        pw_hash = _hash_password(password, salt)
-        uid = _rand()
-
         self.execute(
-            "INSERT INTO users(uid, user_id, public_name, password_hash, password_salt) VALUES(?,?,?,?,?)",
-            uid,
+            "INSERT INTO users VALUES(?,?,?,?,?,?,?)",
+            _rand(),
             user_id,
             public_name,
-            pw_hash,
+            _hash_password(password, salt),
             salt,
+            None,
+            1,
         )
 
     def login(self, user_id: str, password: str, *, user_agent: str | None, ttl_sec: int) -> Session:
         rows = self.execute(
-            "SELECT uid, user_id, password_hash, password_salt, is_active FROM users WHERE user_id = ?",
+            "SELECT uid, user_id, password_hash, password_salt, is_active FROM users WHERE user_id=?",
             user_id,
         )
         if not rows:
             raise AuthInvalidCredentialsError()
 
-        uid, user_id_db, pw_hash, salt, active = rows[0]
+        uid, uid_text, pw_hash, salt, active = rows[0]
         if not active:
             raise AuthUserDisabledError()
-
         if not hmac.compare_digest(_hash_password(password, salt), pw_hash):
             raise AuthInvalidCredentialsError()
 
-        sid = _rand()
         token = _rand()
-        expires = _now() + ttl_sec
+        exp = _now() + ttl_sec
 
         self.execute(
             "INSERT INTO sessions VALUES(?,?,?,?,?,?)",
-            sid,
+            _rand(),
             uid,
             _token_hash(token),
-            expires,
+            exp,
             None,
             user_agent,
         )
 
-        return Session(sid=sid, uid=uid, user_id=user_id_db, token=token, expires_at=expires, revoked_at=None, user_agent=user_agent)
+        return Session("", uid, uid_text, token, exp, None, user_agent)
 
     def logout(self, token: str) -> None:
         self.execute(
-            "UPDATE sessions SET revoked_at = ? WHERE token_hash = ?",
+            "UPDATE sessions SET revoked_at=? WHERE token_hash=?",
             _now(),
             _token_hash(token),
         )
@@ -377,11 +301,9 @@ class AuthDBM(DatabaseManager):
 
         rows = self.execute(
             """
-            SELECT
-              s.sid, s.uid, u.user_id, s.expires_at, s.revoked_at, s.user_agent
-            FROM sessions s
-            JOIN users u ON u.uid = s.uid
-            WHERE s.token_hash = ?
+            SELECT s.sid, s.uid, u.user_id, s.expires_at, s.revoked_at, s.user_agent
+            FROM sessions s JOIN users u ON u.uid=s.uid
+            WHERE s.token_hash=?
             """,
             _token_hash(token),
         )
@@ -392,4 +314,4 @@ class AuthDBM(DatabaseManager):
         if rev or exp <= _now():
             return None
 
-        return Session(sid=sid, uid=uid, user_id=user_id, token=token, expires_at=exp, revoked_at=None, user_agent=ua)
+        return Session(sid, uid, user_id, token, exp, None, ua)

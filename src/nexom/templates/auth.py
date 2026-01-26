@@ -3,8 +3,12 @@ from __future__ import annotations
 
 from importlib import resources
 
-from ..app.response import HtmlResponse
+from ..app.auth import AuthClient
+from ..app.request import Request
+from ..app.response import HtmlResponse, JsonResponse
 from ..core.object_html_render import HTMLDoc, ObjectHTML
+
+from ..core.error import NexomError
 
 # --------------------
 # Object HTML
@@ -26,20 +30,43 @@ _OHTML: ObjectHTML = ObjectHTML(
 # Pages
 # --------------------
 
+class LoginPage:
+    def __init__(self, auth_server: str) -> None:
+        self.client = AuthClient(auth_server)
+
+    def page(self, req: Request, args: dict) -> HtmlResponse | JsonResponse:
+        if req.method == "GET":
+            return HtmlResponse(_OHTML.render("login"))
+
+        try:
+            data = req.json() or {}
+            token, user_id, exp = self.client.login(
+                user_id=data.get("user_id", ""),
+                password=data.get("password", ""),
+            )
+            return JsonResponse({"ok": True, "user_id": user_id, "token": token, "expires_at": exp})
+        except NexomError as e:
+            return JsonResponse({"error": e.code}, status=401)
+        except Exception:
+            return JsonResponse({"error": "Internal Server Error"}, status=401)
 
 class SignupPage:
     def __init__(self, auth_server: str) -> None:
-        self.auth_server = auth_server.rstrip("/")
-        self._doc = _OHTML.render("signup", auth_server=self.auth_server)
+        self.client = AuthClient(auth_server)
 
-    def page(self, *_args, **_kwargs) -> HtmlResponse:
-        return HtmlResponse(self._doc)
+    def page(self, req: Request, args: dict) -> HtmlResponse | JsonResponse:
+        if req.method == "GET":
+            return HtmlResponse(_OHTML.render("signup"))
 
-
-class LoginPage:
-    def __init__(self, auth_server: str) -> None:
-        self.auth_server = auth_server.rstrip("/")
-        self._doc = _OHTML.render("login", auth_server=self.auth_server)
-
-    def page(self, *_args, **_kwargs) -> HtmlResponse:
-        return HtmlResponse(self._doc)
+        try:
+            data = req.json() or {}
+            ok = self.client.signup(
+                user_id=data.get("user_id", ""),
+                public_name=data.get("public_name", ""),
+                password=data.get("password", ""),
+            )
+            return JsonResponse({"ok": ok})
+        except NexomError as e:
+            return JsonResponse({"error": e.code}, status=401)
+        except Exception:
+            return JsonResponse({"error": "Internal Server Error"}, status=401)

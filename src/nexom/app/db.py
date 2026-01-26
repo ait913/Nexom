@@ -21,21 +21,24 @@ class DatabaseManager:
         "for override"
 
     def start_connection(self, auto_commit: bool = True) -> None:
-        self.auto_commit = auto_commit
-        self._conn = connect(self.db_file)
-        self._cursor = self._conn.cursor()
+        try:
+            self.auto_commit = auto_commit
+            self._conn = connect(self.db_file)
+            self._cursor = self._conn.cursor()
 
-        # ---- SQLite safety / performance defaults ----
-        # foreign keys are OFF by default in SQLite
-        self._cursor.execute("PRAGMA foreign_keys = ON")
-        # better concurrency
-        self._cursor.execute("PRAGMA journal_mode = WAL")
-        # avoid immediate 'database is locked'
-        self._cursor.execute("PRAGMA busy_timeout = 3000")
-        # reasonable durability vs speed (WAL推奨とセット)
-        self._cursor.execute("PRAGMA synchronous = NORMAL")
+            # ---- SQLite safety / performance defaults ----
+            # foreign keys are OFF by default in SQLite
+            self._cursor.execute("PRAGMA foreign_keys = ON")
+            # better concurrency
+            self._cursor.execute("PRAGMA journal_mode = WAL")
+            # avoid immediate 'database is locked'
+            self._cursor.execute("PRAGMA busy_timeout = 3000")
+            # reasonable durability vs speed (WAL推奨とセット)
+            self._cursor.execute("PRAGMA synchronous = NORMAL")
 
-        self.commit()
+            self.commit()
+        except Error as e:
+            raise DBMConnectionInvalidError(str(e))
 
     def rip_connection(self) -> None:
         if self._conn is None:
@@ -68,7 +71,7 @@ class DatabaseManager:
             self._conn.rollback()
             raise DBError(str(e))
 
-    def execute_many(self, sql_inserts: Iterable[tuple[str, tuple]]) -> None:
+    def execute_many(self, sql_inserts: Iterable[ list[ tuple[str, tuple] ] ]) -> None:
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
 

@@ -1,3 +1,4 @@
+<!-- assets/auth_page/signup.html -->
 <!doctype html>
 <html lang="ja">
 <head>
@@ -12,9 +13,10 @@
     input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-size:14px; }
     button { margin-top: 14px; padding:10px 12px; border:1px solid #333; border-radius:10px; background:#333; color:#fff; cursor:pointer; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 10px; }
-    a { color:#333; text-decoration: underline; }
+    a { color:#333; }
     .help { color:#666; font-size:12px; }
-    .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap;
+           font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .ok { color:#0a7; }
     .ng { color:#c33; }
   </style>
@@ -40,8 +42,8 @@
         <button type="submit">signup</button>
 
         <div class="row">
-          <span class="help">Auth API に JSON で送信されます。</span>
-          <a class="help" href="/login">login</a>
+          <span class="help">送信先はこのアプリの <code>/signup/</code>（アプリ → AuthClient → AuthService）</span>
+          <a class="help" href="/login/">loginへ</a>
         </div>
       </form>
 
@@ -50,34 +52,29 @@
   </div>
 
   <script>
-    // OHTML placeholder
-    const AUTH_BASE = "{{ auth_server }}".replace(/\/+$/, "");
-
     const logEl = document.getElementById("log");
 
-    function pretty(obj) {
-      try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+    function pretty(v) {
+      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
     }
-
     function writeLog(ok, title, data) {
       const cls = ok ? "ok" : "ng";
       logEl.innerHTML = `<span class="${cls}">${title}</span>\n${pretty(data)}`;
     }
 
-    async function postJSON(path, body) {
-      const res = await fetch(AUTH_BASE + path, {
+    async function postJSON(url, bodyObj) {
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           "Accept": "application/json",
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(bodyObj ?? {}),
       });
 
       const text = await res.text();
       let data = {};
-      try { data = text ? JSON.parse(text) : {}; }
-      catch { data = { raw: text }; }
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
 
       return { ok: res.ok, status: res.status, data };
     }
@@ -91,7 +88,7 @@
       const password2 = document.getElementById("password2").value;
 
       if (!user_id || !public_name || !password) {
-        writeLog(false, "signup: missing fields", {});
+        writeLog(false, "signup: missing fields", { user_id, public_name });
         return;
       }
       if (password !== password2) {
@@ -99,8 +96,10 @@
         return;
       }
 
-      const r = await postJSON("/signup", { user_id, public_name, password });
+      const r = await postJSON("/signup/", { user_id, public_name, password });
       writeLog(r.ok, `signup: ${r.status}`, r.data);
+
+      // if (r.ok) location.href = "/login/";
     });
   </script>
 </body>

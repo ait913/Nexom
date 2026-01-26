@@ -22,6 +22,7 @@ from .error import (
     ObjectHTMLImportError,
     ObjectHTMLInsertValueError,
     ObjectHTMLExtendsError,
+    ObjectHTMLTypeError
 )
 
 
@@ -90,6 +91,8 @@ class ObjectHTML:
             self._set_doc(doc)
 
     def _set_doc(self, doc: HTMLDoc) -> None:
+        if not isinstance(doc, HTMLDoc):
+            raise ObjectHTMLTypeError()
         def _call(**kwargs: str) -> str:
             return self.render(doc.name, **kwargs)
 

@@ -85,6 +85,15 @@ def create_app(
         raise FileExistsError(f"Target app already exists: {app_root}")
     app_root.mkdir(parents=True, exist_ok=False)
 
+    # create data directory
+
+    data_dir = project_root / "data"
+    db_dir = data_dir / "db"
+
+    data_dir.mkdir()
+    db_dir.mkdir()
+
+
     # refuse generating into a non-empty directory (extra safety)
     if any(app_root.iterdir()):
         raise FileExistsError(f"Target app directory is not empty: {app_root}")

@@ -128,7 +128,7 @@ class ObjectHTMLInsertValueError(NexomError):
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            "OH01",
+            "OH02",
             f"This insert value is invalid. '{name}'",
         )
 class ObjectHTMLExtendsError(NexomError):
@@ -136,7 +136,7 @@ class ObjectHTMLExtendsError(NexomError):
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            "OH02",
+            "OH03",
             f"This extends is invalid. '{name}'",
         )
 class ObjectHTMLImportError(NexomError):
@@ -144,8 +144,16 @@ class ObjectHTMLImportError(NexomError):
 
     def __init__(self, name: str) -> None:
         super().__init__(
-            "OH03",
+            "OH04",
             f"This import is invalid. '{name}'",
+        )
+class ObjectHTMLTypeError(NexomError):
+    """Raised when an set HTMLDoc for type is valid."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "OH05",
+            f"This doc is not HTMLDoc'",
         )
 
 
@@ -155,10 +163,10 @@ class ObjectHTMLImportError(NexomError):
 class DBMConnectionInvalidError(NexomError):
     """Raised when an udbm connection is invalid."""
 
-    def __init__(self) -> None:
+    def __init__(self, message="Not started") -> None:
         super().__init__(
             "DBM01",
-            f"DBM connection is invalid.",
+            f"DBM connection is invalid. -> {message}",
         )
 
 class DBError(NexomError):
