@@ -140,6 +140,7 @@ def create_app(
         config_text,
         {
             "__prj_dir__": str(project_root),
+            "__app_name__": str(app_name),
             "__app_dir__": str(app_root),
             "__g_address__": options.address,
             "__g_port__": str(options.port),
@@ -154,6 +155,12 @@ def create_app(
     gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": app_name})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    # wsgi.py
+    wsgi_path = app_root / "wsgi.py"
+    wsgi_text = wsgi_path.read_text(encoding="utf-8")
+    wsgi_enabled = _replace_many(wsgi_text, {"__app_name__": app_name})
+    wsgi_path.write_text(wsgi_enabled, encoding="utf-8")
 
     # pages/_templates.py
     pages_templates_path = pages_dir / "_templates.py"
@@ -190,10 +197,10 @@ def create_auth(
 
     app_root = project_root / "auth"
     if app_root.exists():
-        raise FileExistsError(f"Target app already exists: {app_root}")
+        raise FileExistsError(f"Target auth app already exists: {app_root}")
     app_root.mkdir(parents=True, exist_ok=False)
 
-    app_pkg = "nexom.assets.app"
+    app_pkg = "nexom.assets.auth"
     for fn in ("__init__.py", "gunicorn.conf.py", "wsgi.py", "config.py"):
         _copy_from_package(app_pkg, fn, app_root / fn)
 
@@ -203,6 +210,7 @@ def create_auth(
         config_text,
         {
             "__prj_dir__": str(project_root),
+            "__app_name__": "auth",
             "__app_dir__": str(app_root),
             "__g_address__": options.address,
             "__g_port__": str(options.port),
@@ -243,7 +251,11 @@ def start_project(
 
     # data/
     data_dir = root / "data"
+    log_dir = data_dir / "log"
+    db_dir = data_dir / "db"
     data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    db_dir.mkdir(parents=True, exist_ok=True)
 
     # main app + auth app
     main_opt = main_options or AppBuildOptions()
@@ -264,7 +276,7 @@ def start_project(
         raise FileExistsError(f"Target app already exists: {auth_root}")
     auth_root.mkdir(parents=True, exist_ok=False)
 
-    app_pkg = "nexom.assets.app"
+    app_pkg = "nexom.assets.auth"
     for fn in ("__init__.py", "gunicorn.conf.py", "wsgi.py", "config.py"):
         _copy_from_package(app_pkg, fn, auth_root / fn)
 
@@ -275,6 +287,7 @@ def start_project(
         config_text,
         {
             "__prj_dir__": str(root),
+            "__app_name__": "auth",
             "__app_dir__": str(auth_root),
             "__g_address__": auth_opt.address,
             "__g_port__": str(auth_opt.port),
@@ -295,7 +308,6 @@ def start_project(
         gw = root / "gateway"
         gw.mkdir(parents=True, exist_ok=True)
 
-        # app only (あなたの要件)
         _write_gateway_config(
             gw,
             kind=gateway,

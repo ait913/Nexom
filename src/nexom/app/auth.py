@@ -181,7 +181,7 @@ class AuthClient:
             with urlopen(req, timeout=self.timeout) as r:
                 data = json.loads(r.read().decode("utf-8"))
         except (HTTPError, URLError, json.JSONDecodeError) as e:
-            print(e)
+            print(str(e))
             raise AuthTokenInvalidError()
         return data
 

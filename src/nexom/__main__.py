@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("--reload", action="store_true", help="Enable auto-reload for main app (development)")
 
     # ports etc (auth)
-    sp.add_argument("--auth-address", default="0.0.0.0", help="Bind address for auth app (default: 0.0.0.0)")
+    sp.add_argument("--auth-address", default="127.0.0.1", help="Bind address for auth app (default: 0.0.0.0)")
     sp.add_argument("--auth-port", type=int, default=7070, help="Bind port for auth app (default: 7070)")
     sp.add_argument("--auth-workers", type=int, default=4, help="Gunicorn workers for auth app (default: 4)")
     sp.add_argument("--auth-reload", action="store_true", help="Enable auto-reload for auth app (development)")

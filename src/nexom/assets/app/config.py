@@ -19,7 +19,7 @@ WORKERS: int = __g_workers__
 RELOAD: bool = __g_reload__
 
 # ======== auth ========
-AUTH_SERVER: str = "127.0.0.1:7070"
+AUTH_SERVER: str = "http://127.0.0.1:7070"
 
 # ======== logger ========
 INFO_LOG: str = "__prj_dir__/data/log/__app_name__/info.log"
