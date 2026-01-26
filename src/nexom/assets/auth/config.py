@@ -18,3 +18,10 @@ RELOAD: bool = __g_reload__
 
 # ======== auth service ========
 AUTH_DB: str = DATA_DIR + "/db/auth.db"
+
+# ======== logger ========
+INFO_LOG: str = "__prj_dir__/data/log/__app_name__/info.log"
+WARN_LOG: str = "__prj_dir__/data/log/__app_name__/warning.log"
+ERR_LOG: str = "__prj_dir__/data/log/__app_name__/error.log"
+ACES_LOG: str = "__prj_dir__/data/log/__app_name__/access.log"
+AUTH_LOG: str = "__prj_dir__/data/log/__app_name__/auth.log"

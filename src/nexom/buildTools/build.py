@@ -86,13 +86,13 @@ def create_app(
     app_root.mkdir(parents=True, exist_ok=False)
 
     # create data directory
-
     data_dir = project_root / "data"
     db_dir = data_dir / "db"
+    log_dir = data_dir / "log"
 
-    data_dir.mkdir()
-    db_dir.mkdir()
-
+    data_dir.mkdir(exist_ok=True)
+    db_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
 
     # refuse generating into a non-empty directory (extra safety)
     if any(app_root.iterdir()):
@@ -133,6 +133,7 @@ def create_app(
         config_text,
         {
             "__prj_dir__": str(project_root),
+            "__app_name__": str(app_name),
             "__app_dir__": str(app_root),
             "__g_address__": options.address,
             "__g_port__": str(options.port),
@@ -147,6 +148,12 @@ def create_app(
     gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": app_name})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    # ---- Enable settings (replace wsgi.py) ----
+    wsgi_path = app_root / "wsgi.py"
+    wsgi_text = wsgi_path.read_text(encoding="utf-8")
+    wsgi_enabled = _replace_many(wsgi_text, {"__app_name__": app_name})
+    wsgi_path.write_text(wsgi_enabled, encoding="utf-8")
 
     # ---- Enable settings (replace pages/_templates.py) ----
     pages_templates_path = pages_dir / "_templates.py"
@@ -175,6 +182,15 @@ def create_auth(
         raise FileExistsError(f"Target app already exists: {app_root}")
     app_root.mkdir(parents=True, exist_ok=False)
 
+    # create data directory
+    data_dir = project_root / "data"
+    db_dir = data_dir / "db"
+    log_dir = data_dir / "log"
+
+    data_dir.mkdir(exist_ok=True)
+    db_dir.mkdir(exist_ok=True)
+    log_dir.mkdir(exist_ok=True)
+
     if any(app_root.iterdir()):
         raise FileExistsError(f"Target app directory is not empty: {app_root}")
 
@@ -190,6 +206,7 @@ def create_auth(
         config_text,
         {
             "__prj_dir__": str(project_root),
+            "__app_name__": "auth",
             "__app_dir__": str(app_root),
             "__g_address__": options.address,
             "__g_port__": str(options.port),

@@ -15,7 +15,7 @@ class DatabaseManager:
         self._cursor: Cursor | None = None
 
         self.start_connection(auto_commit=auto_commit)
-        self._init()  # ←これ必須
+        self._init()
 
     def _init(self) -> None:
         "for override"

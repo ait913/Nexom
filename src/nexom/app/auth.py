@@ -15,6 +15,7 @@ from .request import Request
 from .response import JsonResponse
 from .db import DatabaseManager
 from .path import Path, Pathlib
+from ..core.log import AuthLogger
 
 from ..core.error import (
     NexomError,
@@ -23,6 +24,7 @@ from ..core.error import (
     AuthUserDisabledError,
     AuthTokenInvalidError,
 )
+
 
 # --------------------
 # utils
@@ -68,7 +70,7 @@ class AuthService:
     Auth API service (JSON only).
     """
 
-    def __init__(self, db_path: str, *, ttl_sec: int = 60 * 60 * 24 * 7, prefix: str = "") -> None:
+    def __init__(self, db_path: str, log_path: str, *, ttl_sec: int = 60 * 60 * 24 * 7, prefix: str = "") -> None:
         self.dbm = AuthDBM(db_path)
         self.ttl_sec = ttl_sec
 
@@ -82,6 +84,8 @@ class AuthService:
             Path(_p("logout"), self.logout, "AuthLogout"),
             Path(_p("verify"), self.verify, "AuthVerify"),
         )
+
+        self.logger = AuthLogger(log_path)
 
     def handler(self, environ: dict) -> JsonResponse:
         req = Request(environ)
@@ -176,7 +180,8 @@ class AuthClient:
         try:
             with urlopen(req, timeout=self.timeout) as r:
                 data = json.loads(r.read().decode("utf-8"))
-        except (HTTPError, URLError, json.JSONDecodeError):
+        except (HTTPError, URLError, json.JSONDecodeError) as e:
+            print(e)
             raise AuthTokenInvalidError()
         return data
 
