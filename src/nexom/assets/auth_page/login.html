@@ -1,4 +1,3 @@
-<!-- login.html -->
 <!doctype html>
 <html lang="ja">
 <head>
@@ -13,7 +12,7 @@
     input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-size:14px; }
     button { margin-top: 14px; padding:10px 12px; border:1px solid #333; border-radius:10px; background:#333; color:#fff; cursor:pointer; }
     .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 10px; }
-    a { color:#333; }
+    a { color:#333; text-decoration: underline; }
     .help { color:#666; font-size:12px; }
     .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     .ok { color:#0a7; }
@@ -35,8 +34,8 @@
         <button type="submit">login</button>
 
         <div class="row">
-          <span class="help">成功すると Set-Cookie される（HttpOnly想定）。JSでCookieが見えないのは正常。</span>
-          <a class="help" href="/signup">signupへ</a>
+          <span class="help">Auth API に JSON で送信されます。</span>
+          <a class="help" href="/signup">signup</a>
         </div>
       </form>
 
@@ -45,7 +44,7 @@
   </div>
 
   <script>
-    // OHTML placeholder: {{ auth_server }}
+    // OHTML placeholder
     const AUTH_BASE = "{{ auth_server }}".replace(/\/+$/, "");
 
     const logEl = document.getElementById("log");
@@ -53,26 +52,26 @@
     function pretty(obj) {
       try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
     }
+
     function writeLog(ok, title, data) {
       const cls = ok ? "ok" : "ng";
       logEl.innerHTML = `<span class="${cls}">${title}</span>\n${pretty(data)}`;
     }
 
-    async function postJSON(path, bodyObj) {
-      const url = (AUTH_BASE || "") + path;
-      const res = await fetch(url, {
+    async function postJSON(path, body) {
+      const res = await fetch(AUTH_BASE + path, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
           "Accept": "application/json",
         },
-        credentials: "include",
-        body: JSON.stringify(bodyObj ?? {}),
+        body: JSON.stringify(body),
       });
 
       const text = await res.text();
       let data = {};
-      try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+      try { data = text ? JSON.parse(text) : {}; }
+      catch { data = { raw: text }; }
 
       return { ok: res.ok, status: res.status, data };
     }
@@ -84,14 +83,14 @@
       const password = document.getElementById("password").value;
 
       if (!user_id || !password) {
-        writeLog(false, "login: missing fields", { user_id });
+        writeLog(false, "login: missing fields", {});
         return;
       }
 
       const r = await postJSON("/login", { user_id, password });
       writeLog(r.ok, `login: ${r.status}`, r.data);
 
-      // if (r.ok) location.href = "/";
+      // token は r.data.token に入る（Cookieは使わない）
     });
   </script>
 </body>

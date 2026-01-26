@@ -25,7 +25,7 @@ from .cookie import Cookie, RequestCookies
 from .template import ObjectHTMLTemplates
 
 # ---- Auth ----
-from .auth import AuthService, AuthVerify
+from .auth import AuthService, AuthClient
 
 # ---- Middleware ----
 from .middleware import Middleware, MiddlewareChain
