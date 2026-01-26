@@ -4,15 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Nexom"
-version = "1.0.1"
+version = "1.0.2"
 description = "Lightweight Python Web Framework (WSGI)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [
-  { name = "TouriAida" }
-]
+authors = [{ name = "TouriAida" }]
 keywords = ["wsgi", "web", "framework"]
+
+# ★ 追加
+dependencies = [
+  "typing-extensions; python_version < '3.12'",
+]
 
 [project.urls]
 Homepage = "https://nexom.ceez7.com"
