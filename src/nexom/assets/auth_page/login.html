@@ -1,0 +1,98 @@
+<!-- login.html -->
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Nexom Login</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    .card { border: 1px solid #eee; border-radius: 14px; padding: 16px; background: #fff; }
+    label { display:block; font-size:12px; margin: 12px 0 6px; color:#333; }
+    input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-size:14px; }
+    button { margin-top: 14px; padding:10px 12px; border:1px solid #333; border-radius:10px; background:#333; color:#fff; cursor:pointer; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 10px; }
+    a { color:#333; }
+    .help { color:#666; font-size:12px; }
+    .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .ok { color:#0a7; }
+    .ng { color:#c33; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 style="margin:0 0 12px;font-size:20px;">Login</h1>
+
+    <section class="card">
+      <form id="formLogin">
+        <label for="user_id">user_id</label>
+        <input id="user_id" name="user_id" autocomplete="username" required />
+
+        <label for="password">password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+        <button type="submit">login</button>
+
+        <div class="row">
+          <span class="help">成功すると Set-Cookie される（HttpOnly想定）。JSでCookieが見えないのは正常。</span>
+          <a class="help" href="/signup">signupへ</a>
+        </div>
+      </form>
+
+      <div id="log" class="log">ready</div>
+    </section>
+  </div>
+
+  <script>
+    // OHTML placeholder: {{ auth_server }}
+    const AUTH_BASE = "{{ auth_server }}".replace(/\/+$/, "");
+
+    const logEl = document.getElementById("log");
+
+    function pretty(obj) {
+      try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+    }
+    function writeLog(ok, title, data) {
+      const cls = ok ? "ok" : "ng";
+      logEl.innerHTML = `<span class="${cls}">${title}</span>\n${pretty(data)}`;
+    }
+
+    async function postJSON(path, bodyObj) {
+      const url = (AUTH_BASE || "") + path;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Accept": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify(bodyObj ?? {}),
+      });
+
+      const text = await res.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+
+      return { ok: res.ok, status: res.status, data };
+    }
+
+    document.getElementById("formLogin").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const user_id = document.getElementById("user_id").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (!user_id || !password) {
+        writeLog(false, "login: missing fields", { user_id });
+        return;
+      }
+
+      const r = await postJSON("/login", { user_id, password });
+      writeLog(r.ok, `login: ${r.status}`, r.data);
+
+      // if (r.ok) location.href = "/";
+    });
+  </script>
+</body>
+</html>

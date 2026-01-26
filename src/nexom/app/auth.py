@@ -139,7 +139,7 @@ class AuthService:
             ttl_sec=self.ttl_sec,
         )
 
-        ck = Cookie(self.COOKIE_NAME, sess.token, MaxAge=self.ttl_sec, Path="/")
+        ck = Cookie(self.COOKIE_NAME, sess.token, secure=False, MaxAge=self.ttl_sec, Path="/")
         return JsonResponse({"ok": True}, cookie=str(ck))
 
     def logout(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
@@ -153,7 +153,7 @@ class AuthService:
         if token:
             self.dbm.logout(token)
 
-        ck = Cookie(self.COOKIE_NAME, "", MaxAge=0, Path="/")
+        ck = Cookie(self.COOKIE_NAME, "", secure=False, MaxAge=0, Path="/")
         return JsonResponse({"ok": True}, cookie=str(ck))
 
     def verify(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:

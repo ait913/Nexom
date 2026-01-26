@@ -4,6 +4,8 @@ from typing import Iterable, Optional
 from importlib import resources
 import json
 
+from ..core.object_html_render import HTMLDoc, ObjectHTML
+
 from .http_status_codes import http_status_codes
 
 
@@ -132,6 +134,7 @@ class ErrorResponse(Response):
 
     def __init__(self, status: int, message: str) -> None:
         html = self._render(status, message)
+        
         super().__init__(html, status=status)
 
     @staticmethod
@@ -144,8 +147,10 @@ class ErrorResponse(Response):
             .read_text(encoding="utf-8")
         )
 
+        ohtml = ObjectHTML(HTMLDoc("error_page", template))
+
+        status_str = f"{status} - {http_status_codes.get(status)}"
+
         return (
-            template
-            .replace("__STATUS__", status_text)
-            .replace("__MESSAGE__", message)
+            ohtml.render("error_page", status=status_str, message=message)
         )
