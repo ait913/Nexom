@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, override
+from typing import Optional
 import secrets
 import time
 import hashlib
@@ -210,7 +210,8 @@ class AuthClient:
 # --------------------
 
 class AuthDBM(DatabaseManager):
-    @override
+
+    # override
     def _init(self) -> None:
         self.execute_many(
             [
