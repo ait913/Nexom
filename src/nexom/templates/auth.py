@@ -7,8 +7,8 @@ from ..app.auth import AuthClient
 from ..app.request import Request
 from ..app.response import HtmlResponse, JsonResponse
 from ..core.object_html_render import HTMLDoc, ObjectHTML
+from ..core.error import NexomError, _status_for_auth_error
 
-from ..core.error import NexomError
 
 # --------------------
 # Object HTML
@@ -41,14 +41,17 @@ class LoginPage:
         try:
             data = req.json() or {}
             token, user_id, exp = self.client.login(
-                user_id=data.get("user_id", ""),
-                password=data.get("password", ""),
+                user_id=str(data.get("user_id") or ""),
+                password=str(data.get("password") or ""),
             )
             return JsonResponse({"ok": True, "user_id": user_id, "token": token, "expires_at": exp})
+
         except NexomError as e:
-            return JsonResponse({"error": e.code}, status=401)
+            return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
+
         except Exception:
-            return JsonResponse({"error": "Internal Server Error"}, status=401)
+            return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
+
 
 class SignupPage:
     def __init__(self, auth_server: str) -> None:
@@ -60,13 +63,15 @@ class SignupPage:
 
         try:
             data = req.json() or {}
-            ok = self.client.signup(
-                user_id=data.get("user_id", ""),
-                public_name=data.get("public_name", ""),
-                password=data.get("password", ""),
+            self.client.signup(
+                user_id=str(data.get("user_id") or ""),
+                public_name=str(data.get("public_name") or ""),
+                password=str(data.get("password") or ""),
             )
-            return JsonResponse({"ok": ok})
+            return JsonResponse({"ok": True}, status=201)
+
         except NexomError as e:
-            return JsonResponse({"error": e.code}, status=401)
+            return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
+
         except Exception:
-            return JsonResponse({"error": "Internal Server Error"}, status=401)
+            return JsonResponse({"ok": False, "error": "InternalError"}, status=500)

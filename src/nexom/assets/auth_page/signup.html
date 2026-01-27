@@ -5,64 +5,233 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Nexom Signup</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    .card { border: 1px solid #eee; border-radius: 14px; padding: 16px; background: #fff; }
-    label { display:block; font-size:12px; margin: 12px 0 6px; color:#333; }
-    input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-size:14px; }
-    button { margin-top: 14px; padding:10px 12px; border:1px solid #333; border-radius:10px; background:#333; color:#fff; cursor:pointer; }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 10px; }
-    a { color:#333; }
-    .help { color:#666; font-size:12px; }
-    .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap;
-           font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-    .ok { color:#0a7; }
-    .ng { color:#c33; }
+    :root{
+      --bg:#0b0d12;
+      --card:#0f141c;
+      --line:rgba(255,255,255,.10);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.62);
+      --danger:#ff5a6a;
+      --ok:#27d39b;
+      --btn:#ffffff;
+      --btnText:#0b0d12;
+      --shadow:0 20px 60px rgba(0,0,0,.45);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      background: radial-gradient(1200px 600px at 20% 10%, rgba(106,140,255,.18), transparent 60%),
+                  radial-gradient(900px 500px at 85% 30%, rgba(39,211,155,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      font-family: Inter, "Noto Sans JP", "Hiragino Sans", "ヒラギノ角ゴシック", "Yu Gothic", "游ゴシック", system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow:hidden; /* スクロール禁止 */
+    }
+    .wrap{
+      height:100%;
+      display:grid;
+      place-items:center;
+      padding:24px;
+    }
+    .card{
+      width:min(560px, 100%);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow: var(--shadow);
+      padding:18px;
+      backdrop-filter: blur(10px);
+    }
+    h1{
+      margin:0 0 10px;
+      font-size:18px;
+      letter-spacing:.2px;
+    }
+    .sub{
+      margin:0 0 14px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.5;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .grid .full{ grid-column:1 / -1; }
+
+    label{
+      display:block;
+      font-size:11px;
+      color:var(--muted);
+      margin:0 0 6px;
+    }
+    input{
+      width:100%;
+      height:40px;
+      padding:0 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      color:var(--text);
+      outline:none;
+      font-size:13px;
+    }
+    input:focus{
+      border-color: rgba(255,255,255,.18);
+      box-shadow: 0 0 0 3px rgba(106,140,255,.12);
+    }
+
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      margin-top:12px;
+    }
+
+    button{
+      height:40px;
+      padding:0 14px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background: var(--btn);
+      color: var(--btnText);
+      font-weight:700;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    button:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .link{
+      color:var(--muted);
+      font-size:12px;
+      text-decoration:none;
+      border-bottom:1px dotted rgba(255,255,255,.25);
+    }
+    .link:hover{ color:var(--text); }
+
+    .msg{
+      display:none;
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      font-size:12px;
+      line-height:1.5;
+      white-space:pre-wrap;
+      background: rgba(0,0,0,.22);
+    }
+    .msg.is-error{ display:block; border-color: rgba(255,90,106,.35); }
+    .msg.is-ok{ display:block; border-color: rgba(39,211,155,.35); }
+
+    .okPanel{
+      display:none;
+      margin-top:10px;
+      padding:12px;
+      border-radius:14px;
+      border:1px solid rgba(39,211,155,.35);
+      background: rgba(39,211,155,.10);
+    }
+    .okPanel.show{ display:block; }
+    .okTitle{
+      font-weight:700;
+      font-size:13px;
+      margin:0 0 6px;
+    }
+    .okText{
+      margin:0 0 10px;
+      font-size:12px;
+      color:var(--muted);
+      line-height:1.5;
+    }
+    .okBtn{
+      width:100%;
+      height:40px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.92);
+      color:#0b0d12;
+      font-weight:800;
+      cursor:pointer;
+    }
   </style>
 </head>
+
 <body>
   <div class="wrap">
-    <h1 style="margin:0 0 12px;font-size:20px;">Signup</h1>
-
     <section class="card">
-      <form id="formSignup">
-        <label for="user_id">user_id</label>
-        <input id="user_id" name="user_id" autocomplete="username" required />
+      <h1>Signup</h1>
+      <p class="sub">アカウントを作成します。作成後、ボタンでログイン画面へ移動します。</p>
 
-        <label for="public_name">public_name</label>
-        <input id="public_name" name="public_name" autocomplete="nickname" required />
+      <form id="form">
+        <div class="grid">
+          <div class="full">
+            <label for="user_id">user_id</label>
+            <input id="user_id" name="user_id" autocomplete="username" required />
+          </div>
 
-        <label for="password">password</label>
-        <input id="password" name="password" type="password" autocomplete="new-password" required />
+          <div class="full">
+            <label for="public_name">public_name</label>
+            <input id="public_name" name="public_name" autocomplete="nickname" required />
+          </div>
 
-        <label for="password2">password (confirm)</label>
-        <input id="password2" name="password2" type="password" autocomplete="new-password" required />
-
-        <button type="submit">signup</button>
+          <div>
+            <label for="password">password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password" required />
+          </div>
+          <div>
+            <label for="password2">password (confirm)</label>
+            <input id="password2" name="password2" type="password" autocomplete="new-password" required />
+          </div>
+        </div>
 
         <div class="row">
-          <span class="help">送信先はこのアプリの <code>/signup/</code>（アプリ → AuthClient → AuthService）</span>
-          <a class="help" href="/login/">loginへ</a>
+          <a class="link" href="/login">loginへ</a>
+          <button id="btn" type="submit">create</button>
+        </div>
+
+        <div id="msg" class="msg"></div>
+
+        <div id="okPanel" class="okPanel">
+          <div class="okTitle">アカウントが作成されました</div>
+          <p class="okText">続けてログインしてください。</p>
+          <button id="toLogin" class="okBtn" type="button">ログイン画面へ</button>
         </div>
       </form>
-
-      <div id="log" class="log">ready</div>
     </section>
   </div>
 
   <script>
-    const logEl = document.getElementById("log");
+    const AUTH_BASE = "";
 
-    function pretty(v) {
-      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+    const form = document.getElementById("form");
+    const btn = document.getElementById("btn");
+    const msg = document.getElementById("msg");
+    const okPanel = document.getElementById("okPanel");
+    const toLogin = document.getElementById("toLogin");
+
+    function clearMsg(){
+      msg.className = "msg";
+      msg.textContent = "";
     }
-    function writeLog(ok, title, data) {
-      const cls = ok ? "ok" : "ng";
-      logEl.innerHTML = `<span class="${cls}">${title}</span>\n${pretty(data)}`;
+    function setError(text){
+      msg.className = "msg is-error";
+      msg.textContent = text;
     }
 
-    async function postJSON(url, bodyObj) {
+    async function postJSON(path, bodyObj){
+      const url = (AUTH_BASE || "") + path;
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -75,12 +244,13 @@
       const text = await res.text();
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-
       return { ok: res.ok, status: res.status, data };
     }
 
-    document.getElementById("formSignup").addEventListener("submit", async (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      clearMsg();
+      okPanel.classList.remove("show");
 
       const user_id = document.getElementById("user_id").value.trim();
       const public_name = document.getElementById("public_name").value.trim();
@@ -88,18 +258,36 @@
       const password2 = document.getElementById("password2").value;
 
       if (!user_id || !public_name || !password) {
-        writeLog(false, "signup: missing fields", { user_id, public_name });
+        setError("T: missing fields");
         return;
       }
       if (password !== password2) {
-        writeLog(false, "signup: password mismatch", {});
+        setError("T: password mismatch");
         return;
       }
 
-      const r = await postJSON("/signup/", { user_id, public_name, password });
-      writeLog(r.ok, `signup: ${r.status}`, r.data);
+      btn.disabled = true;
+      try{
+        const r = await postJSON("/signup", { user_id, public_name, password });
 
-      // if (r.ok) location.href = "/login/";
+        if (!r.ok || !r.data || r.data.ok !== true) {
+
+          const code = (r.data && r.data.error) ? String(r.data.error) : "UnknownError";
+          setError(code);
+          return;
+        }
+
+        okPanel.classList.add("show");
+      }catch(e){
+        console.error(e)
+        setError("NetworkError");
+      }finally{
+        btn.disabled = false;
+      }
+    });
+
+    toLogin.addEventListener("click", () => {
+      location.href = "/login";
     });
   </script>
 </body>

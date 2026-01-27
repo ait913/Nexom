@@ -5,59 +5,164 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Nexom Login</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
+
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    .card { border: 1px solid #eee; border-radius: 14px; padding: 16px; background: #fff; }
-    label { display:block; font-size:12px; margin: 12px 0 6px; color:#333; }
-    input { width:100%; padding:10px 12px; border:1px solid #ddd; border-radius:10px; font-size:14px; }
-    button { margin-top: 14px; padding:10px 12px; border:1px solid #333; border-radius:10px; background:#333; color:#fff; cursor:pointer; }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top: 10px; }
-    a { color:#333; }
-    .help { color:#666; font-size:12px; }
-    .log { margin-top: 14px; padding: 12px; border-radius: 12px; background:#f7f7f7; border:1px solid #eee; white-space: pre-wrap;
-           font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-    .ok { color:#0a7; }
-    .ng { color:#c33; }
+    :root{
+      --bg:#0b0d12;
+      --card:#0f141c;
+      --line:rgba(255,255,255,.10);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.62);
+      --danger:#ff5a6a;
+      --btn:#ffffff;
+      --btnText:#0b0d12;
+      --shadow:0 20px 60px rgba(0,0,0,.45);
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      background: radial-gradient(1200px 600px at 20% 10%, rgba(106,140,255,.18), transparent 60%),
+                  radial-gradient(900px 500px at 85% 30%, rgba(39,211,155,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      font-family: Inter, "Noto Sans JP", "Hiragino Sans", "ヒラギノ角ゴシック", "Yu Gothic", "游ゴシック", system-ui, -apple-system, "Segoe UI", sans-serif;
+      overflow:hidden; /* スクロール禁止 */
+    }
+    .wrap{
+      height:100%;
+      display:grid;
+      place-items:center;
+      padding:24px;
+    }
+    .card{
+      width:min(560px, 100%);
+      background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow: var(--shadow);
+      padding:18px;
+      backdrop-filter: blur(10px);
+    }
+    h1{
+      margin:0 0 10px;
+      font-size:18px;
+      letter-spacing:.2px;
+    }
+    .sub{
+      margin:0 0 14px;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.5;
+    }
+    label{
+      display:block;
+      font-size:11px;
+      color:var(--muted);
+      margin:0 0 6px;
+    }
+    input{
+      width:100%;
+      height:40px;
+      padding:0 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background: rgba(0,0,0,.25);
+      color:var(--text);
+      outline:none;
+      font-size:13px;
+    }
+    input:focus{
+      border-color: rgba(255,255,255,.18);
+      box-shadow: 0 0 0 3px rgba(106,140,255,.12);
+    }
+    .row{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      margin-top:12px;
+    }
+    button{
+      height:40px;
+      padding:0 14px;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,.08);
+      background: var(--btn);
+      color: var(--btnText);
+      font-weight:800;
+      cursor:pointer;
+      white-space:nowrap;
+    }
+    button:disabled{ opacity:.55; cursor:not-allowed; }
+    .link{
+      color:var(--muted);
+      font-size:12px;
+      text-decoration:none;
+      border-bottom:1px dotted rgba(255,255,255,.25);
+    }
+    .link:hover{ color:var(--text); }
+
+    .msg{
+      display:none;
+      margin-top:10px;
+      padding:10px 12px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      font-size:12px;
+      line-height:1.5;
+      white-space:pre-wrap;
+      background: rgba(0,0,0,.22);
+    }
+    .msg.is-error{ display:block; border-color: rgba(255,90,106,.35); }
   </style>
 </head>
+
 <body>
   <div class="wrap">
-    <h1 style="margin:0 0 12px;font-size:20px;">Login</h1>
-
     <section class="card">
-      <form id="formLogin">
+      <h1>Login</h1>
+      <p class="sub">ログインすると cookie (<code>_nxt</code>) を保存して、トップページへ戻ります。</p>
+
+      <form id="form">
         <label for="user_id">user_id</label>
         <input id="user_id" name="user_id" autocomplete="username" required />
 
-        <label for="password">password</label>
+        <label for="password" style="margin-top:10px;">password</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required />
 
-        <button type="submit">login</button>
-
         <div class="row">
-          <span class="help">送信先はこのアプリの <code>/login/</code>（アプリ → AuthClient → AuthService）</span>
-          <a class="help" href="/signup/">signupへ</a>
+          <a class="link" href="/signup">signupへ</a>
+          <button id="btn" type="submit">login</button>
         </div>
-      </form>
 
-      <div id="log" class="log">ready</div>
+        <div id="msg" class="msg"></div>
+      </form>
     </section>
   </div>
 
   <script>
-    const logEl = document.getElementById("log");
+    const AUTH_BASE = "";
 
-    function pretty(v) {
-      try { return JSON.stringify(v, null, 2); } catch { return String(v); }
+    const form = document.getElementById("form");
+    const btn = document.getElementById("btn");
+    const msg = document.getElementById("msg");
+
+    function clearMsg(){
+      msg.className = "msg";
+      msg.textContent = "";
     }
-    function writeLog(ok, title, data) {
-      const cls = ok ? "ok" : "ng";
-      logEl.innerHTML = `<span class="${cls}">${title}</span>\n${pretty(data)}`;
+    function setError(text){
+      msg.className = "msg is-error";
+      msg.textContent = text;
     }
 
-    async function postJSON(url, bodyObj) {
-      const res = await fetch(url, {
+    async function postJSON(path, bodyObj){
+      const res = await fetch(path, {
         method: "POST",
         headers: {
           "Content-Type": "application/json; charset=utf-8",
@@ -69,26 +174,40 @@
       const text = await res.text();
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-
       return { ok: res.ok, status: res.status, data };
     }
 
-    document.getElementById("formLogin").addEventListener("submit", async (e) => {
+    form.addEventListener("submit", async (e) => {
       e.preventDefault();
+      clearMsg();
 
       const user_id = document.getElementById("user_id").value.trim();
       const password = document.getElementById("password").value;
 
-      if (!user_id || !password) {
-        writeLog(false, "login: missing fields", { user_id });
+      if (!user_id || !password){
+        setError("T: missing fields");
         return;
       }
 
-      const r = await postJSON("/login/", { user_id, password });
-      writeLog(r.ok, `login: ${r.status}`, r.data);
+      btn.disabled = true;
+      try{
+        // 重要: AuthServiceに直接ではなく「今いるアプリ」にPOST
+        const r = await postJSON("/login", { user_id, password });
 
-      // 例: token を localStorage に保存したいならここ（仕様次第）
-      // if (r.ok && r.data && r.data.token) localStorage.setItem("nexom_token", r.data.token);
+        if (!r.ok || !r.data || r.data.ok !== true){
+          const code = (r.data && r.data.error) ? String(r.data.error) : "UnknownError";
+          setError(code);
+          return;
+        }
+
+        // 成功: cookie はサーバー側が Set-Cookie で付ける想定
+        // トップへ戻す
+        location.href = "/";
+      }catch{
+        setError("NetworkError");
+      }finally{
+        btn.disabled = false;
+      }
     });
   </script>
 </body>

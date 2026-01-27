@@ -160,68 +160,161 @@ class ObjectHTMLTypeError(NexomError):
 # =========================
 # DatabaseManager
 # =========================
-class DBMConnectionInvalidError(NexomError):
-    """Raised when an udbm connection is invalid."""
+class DBError(NexomError):
+    """
+    Base class for database-related errors.
 
-    def __init__(self, message="Not started") -> None:
+    This error represents a generic database failure that does not fall into
+    a more specific category such as connection, integrity, operational, or
+    programming errors.
+
+    It is typically used as a catch-all or wrapper error when the underlying
+    database exception cannot be safely or clearly classified.
+    """
+
+class DBMConnectionInvalidError(DBError):
+    """
+    Raised when the database manager connection is invalid or not initialized.
+
+    This error indicates that the database manager (DBM) is in an unusable state,
+    such as:
+    - the database connection has not been established yet
+    - the connection was already closed
+    - the DBM was accessed before proper initialization
+
+    This is typically a lifecycle or configuration error.
+    """
+    def __init__(self, message: str = "Not started") -> None:
         super().__init__(
             "DBM01",
             f"DBM connection is invalid. -> {message}",
         )
 
-class DBError(NexomError):
-    """Raised when an udbm connection is invalid."""
 
-    def __init__(self, message) -> None:
+class DBOperationalError(DBError):
+    """
+    Raised when a database operational error occurs.
+
+    This error represents failures related to the database runtime environment,
+    such as:
+    - inability to open or connect to the database file
+    - database being locked
+    - I/O errors during a query
+    - transaction failures caused by the database state
+
+    Typically maps to sqlite3.OperationalError.
+    """
+    def __init__(self, message: str) -> None:
         super().__init__(
             "DBM02",
-            f"DBM connection is invalid. -> {message}",
+            f"Database operational error. -> {message}",
         )
+
+
+class DBIntegrityError(DBError):
+    """
+    Raised when a database integrity constraint is violated.
+
+    This error indicates that a database constraint has been broken, such as:
+    - UNIQUE constraint violations
+    - FOREIGN KEY constraint failures
+    - NOT NULL constraint violations
+    - CHECK constraint failures
+
+    Typically maps to sqlite3.IntegrityError.
+    """
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            "DBM03",
+            f"Database integrity constraint violated. -> {message}",
+        )
+
+
+class DBProgrammingError(DBError):
+    """
+    Raised when a database programming or SQL syntax error occurs.
+
+    This error indicates a bug in application code or query construction, such as:
+    - malformed SQL statements
+    - referencing non-existent tables or columns
+    - incorrect parameter binding
+    - misuse of the database API
+
+    Typically maps to sqlite3.ProgrammingError.
+    """
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            "DBM04",
+            f"Database programming error. -> {message}",
+        )
+
 
 # =========================
 # Auth
 # =========================
 
 class AuthMissingFieldError(NexomError):
-    """Raised when required auth fields are missing."""
+    """Required auth fields are missing."""
     def __init__(self, key: str) -> None:
-        super().__init__(
-            "A01", 
-            f"Missing field. '{key}'"
-        )
+        super().__init__("A01", f"Missing field. '{key}'")
+
+
+class AuthUserIdAlreadyExistsError(NexomError):
+    """user_id already exists (signup conflict)."""
+    def __init__(self) -> None:
+        super().__init__("A02", "This user_id is already in use.")
 
 
 class AuthInvalidCredentialsError(NexomError):
-    """Raised when user_id or password is invalid."""
+    """user_id or password is invalid (login)."""
     def __init__(self) -> None:
-        super().__init__(
-            "A02", 
-            "Invalid credentials."
-        )
+        super().__init__("A03", "Invalid credentials.")
 
 
 class AuthUserDisabledError(NexomError):
-    """Raised when the user is inactive/disabled."""
+    """User is inactive/disabled."""
     def __init__(self) -> None:
-        super().__init__(
-            "A03", 
-            "This user is disabled."
-        )
+        super().__init__("A04", "This user is disabled.")
+
+
+class AuthTokenMissingError(NexomError):
+    """Token is missing."""
+    def __init__(self) -> None:
+        super().__init__("A05", "Token is missing.")
 
 
 class AuthTokenInvalidError(NexomError):
-    """Raised when token is missing/invalid/expired/revoked."""
+    """Token is invalid (malformed / not found)."""
     def __init__(self) -> None:
-        super().__init__(
-            "A04", 
-            "This token is invalid."
-        )
+        super().__init__("A06", "This token is invalid.")
+
+
+class AuthTokenExpiredError(NexomError):
+    """Token is expired."""
+    def __init__(self) -> None:
+        super().__init__("A07", "This token has expired.")
+
+
+class AuthTokenRevokedError(NexomError):
+    """Token is revoked (logout etc)."""
+    def __init__(self) -> None:
+        super().__init__("A08", "This token is revoked.")
 
 
 class AuthServiceUnavailableError(NexomError):
-    """Raised when AuthService is unreachable or failed to respond."""
+    """AuthService is unreachable / timed out / invalid response."""
     def __init__(self) -> None:
-        super().__init__(
-            "A05",
-            "Authentication service is currently unavailable."
-        )
+        super().__init__("A09", "Authentication service is currently unavailable.")
+
+def _status_for_auth_error(code: str) -> int:
+    return {
+        "A01": 400,  # missing field
+        "A02": 409,  # user_id already exists
+        "A03": 401,  # invalid credentials
+        "A04": 403,  # user disabled
+        "A05": 401,  # token missing
+        "A06": 401,  # token invalid
+        "A07": 401,  # token expired
+        "A08": 401,  # token revoked
+        "A09": 503,  # auth service unavailable
+    }.get(code, 400)

@@ -1,9 +1,35 @@
 from __future__ import annotations
 
 from typing import Any, Iterable
-from sqlite3 import connect, Connection, Cursor, Error
+from sqlite3 import (
+    connect, 
+    Connection, 
+    Cursor, 
 
-from ..core.error import DBMConnectionInvalidError, DBError
+    Error,
+    OperationalError,
+    IntegrityError,
+    ProgrammingError
+)
+
+from ..core.error import (
+    DBError,
+
+    DBMConnectionInvalidError, 
+    DBOperationalError,
+    DBIntegrityError,
+    DBProgrammingError
+)
+
+def _call_error_handler(e: Error):
+    if isinstance(e, OperationalError):
+        raise DBOperationalError(str(e))
+    elif isinstance(e, ProgrammingError):
+        raise DBProgrammingError(str(e))
+    elif isinstance(e, IntegrityError):
+        raise DBIntegrityError(str(e))
+    else:
+        raise DBMConnectionInvalidError(str(e))
 
 
 class DatabaseManager:
@@ -39,7 +65,7 @@ class DatabaseManager:
 
             self.commit()
         except Error as e:
-            raise DBMConnectionInvalidError(str(e))
+            _call_error_handler(e)
 
     def rip_connection(self) -> None:
         if self._conn is None:
@@ -70,7 +96,8 @@ class DatabaseManager:
 
         except Error as e:
             self._conn.rollback()
-            raise DBError(str(e))
+            _call_error_handler(e)
+
 
     def execute_many(self, sql_inserts: Iterable[ list[ tuple[str, tuple] ] ]) -> None:
         if self._conn is None or self._cursor is None:
@@ -85,4 +112,5 @@ class DatabaseManager:
 
         except Error as e:
             self._conn.rollback()
-            raise DBError(str(e))
+            _call_error_handler(e)
+        
