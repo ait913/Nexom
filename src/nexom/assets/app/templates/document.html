@@ -1,169 +1,125 @@
 <Extends base />
 <Insert main>
-    <section id="install">
-      <h2>インストール</h2>
-      <pre><code>pip install nexom</code></pre>
-      <div class="note">
-        <strong>前提:</strong> Nexom は WSGI ベースです。WSGI サーバ（例: gunicorn）と組み合わせて動かす想定です。
-      </div>
-    </section>
+<div class="article-container">
+<h1 id="nexom">README</h1>
+<p>Lightweight Python Web Framework (WSGI)</p>
+<p>Nexomは短いコードで最低限動作し、シンプルで理解のしやすい設計・構造を目指しています。<br>
+また細かい仕様も変更でき、多様な処理に対応します。</p>
+<h2 id="はじめる">はじめる </h2>
+<p>最初のサーバーを起動するには、3つの手順が必要です。</p>
+<ol>
+<li>プロジェクトディレクトリを作成</li>
+<li>nexomをpipでインストール、プロジェクトのビルド</li>
+<li>起動</li>
+</ol>
+<h3 id="1プロジェクトディレクトリの作成">1.プロジェクトディレクトリの作成 </h3>
+<p><strong>準備</strong></p>
+<p>用意していない場合はディレクトリを作成し、仮想環境も準備してください</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>mkdir banana_project
+cd banana_project
 
-    <section id="quickstart">
-      <h2>最短スタート</h2>
-      <p>まずは「HTML を返すルート」を 1 本作るのが最速です。</p>
-      <h3>ルート定義（例）</h3>
-      <pre><code>from nexom.web.path import Path, Pathlib
-from nexom.web.response import HtmlResponse
+python -m venv venv
+source venv/bin/activate
+</code></pre><h3 id="2-pipでインストール-サーバーのビルド">2. pipでインストール、サーバーのビルド </h3>
+<p><strong>インストール</strong></p>
+<p>nexomをインストールします。</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>pip install
+</code></pre><p><strong>プロジェクトのビルド</strong></p>
+<p>プロジェクトディレクトリ上で、以下のコマンドを実行してください(名前は自由)<br>
+もしNginxもしくはApacheを使用する場合 --gateway オプションにどちらか入力してください</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom start-project
+</code></pre><p>以下の構成でプロジェクトが生成されます。</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>banana_project/
+├─ app/
+│  ├─ pages/
+│  │  ├─ __init__.py
+│  │  ├─ _templates.py
+│  │  └─ * pages *
+│  ├─ static/
+│  │  └─ * static items *
+│  ├─ templates/
+│  │  └─ * html files *
+│  ├─ __init__.py
+│  ├─ config.py
+│  ├─ gunicorn.conf.py
+│  ├─ router.py
+│  └─ wsgi.py
+├─ auth/
+│  ├─ __init__.py
+│  ├─ config.py
+│  ├─ gunicorn.conf.py
+│  └─ wsgi.py
+└─ data/
+   ├─ log/
+   │  └─ * app logs *
+   ├─ db/
+   │  └─ * app db *
+   └─ gateway/
+      ├─ app.nginx.conf
+      └─ app.apache.conf
+</code></pre><h3 id="3起動">3.起動 </h3>
+<p>以下のコマンドを起動します。</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom run
+</code></pre><p>ブラウザからアクセスできるようになります。<br>
+デフォルトのポートは8080です。</p>
+<p><a href="https://localhost:8080">https://localhost:8080</a></p>
+<p>ポートなどの設定は <code>config.py</code> から変更してください。</p>
+<h2 id="nginx等使用して外部公開する">Nginx等使用して外部公開する </h2>
+<p>gatewayディレクトリにある設定を読み込んでください</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>http {
+    include /home/ubuntu/banana_project/gateway/*.conf;
+}
+</code></pre><h2 id="systemdに登録して自動起動する">Systemdに登録して自動起動する </h2>
+<p><strong>Ubuntuの場合</strong></p>
+<ol>
+<li><code>/etc/systemd/system</code> に、 <code>banana_sample.service</code> を作成します。</li>
+<li><code>banana_sample.service</code> に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)</li>
+</ol>
+<p>サーバーのディレクトリが <code>/home/ubuntu/banana_project</code> にある場合</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>[Unit]
+Description=Nexom Web Freamework
+After=network.target
 
-def index(request, args):
-    return HtmlResponse("&lt;h1&gt;Hello Nexom&lt;/h1&gt;")
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/home/ubuntu/banana_project
+Environment="PYTHONPATH=/home/ubuntu/banana_project"
+ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn sample.wsgi:app --config sample/gunicorn.conf.py
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+</code></pre><p>以下のコマンドを実行します</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
+sudo systemd enable banana_sample
+sudo systemd start banana_sample
+</code></pre><h3 id="テンプレートユニットを活用して複数のアプリを効率的に管理">テンプレートユニットを活用して複数のアプリを効率的に管理 </h3>
+<p>テンプレートユニットを活用し .service ファイルを一枚にまとめられます。</p>
+<p><code>/etc/systemd/system/banana-project@.service</code></p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>[Unit]
+Description=Nexom Web Server (%i)
+After=network.target
 
-routing = Pathlib(
-    Path("", index, "index"),
-)</code></pre>
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/home/ubuntu/banana_project
+Environment="PYTHONPATH=/home/ubuntu/banana_project"
+ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn ％iwsgi:app --config %i/gunicorn.conf.py
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
 
-      <p class="note">
-        <strong>ポイント:</strong> Nexom の handler は <code>(request, args)</code> を受け取って <code>Response</code>（または <code>HtmlResponse</code>/<code>JsonResponse</code>）を返すのが基本です。
-      </p>
-    </section>
+sudo systemd enable banana-project@banana1
+sudo systemd enable banana-project@banana2
+sudo systemd enable banana-project@banana3
 
-    <section id="routing">
-      <h2>ルーティング</h2>
-
-      <h3>基本</h3>
-      <pre><code>from nexom.web.path import Path, Pathlib
-
-routing = Pathlib(
-    Path("", index, "index"),
-    Path("doc/", docs, "docs"),
-)</code></pre>
-
-      <h3>パスパラメータ（{id}）</h3>
-      <p><code>user/{id}</code> のように書くと、URL の該当部分が <code>args</code> に入ります。</p>
-      <pre><code>from nexom.web.response import HtmlResponse
-
-def user(request, args):
-    return HtmlResponse(f"&lt;p&gt;User ID: {args['id']}&lt;/p&gt;")
-
-Path("user/{id}", user, "user")</code></pre>
-
-      <h3>静的ファイル（Static）</h3>
-      <p><code>Static</code> を使うと、ディレクトリ配下のファイルを配信できます。</p>
-      <pre><code>from nexom.web.path import Static
-
-Static("static/", "./static", "static_files")</code></pre>
-      <ul>
-        <li><code>/static/xxx</code> を <code>./static/xxx</code> にマップして配信します。</li>
-        <li>ディレクトリトラバーサル対策（<code>../</code>）はフレームワーク側でブロックする設計です。</li>
-      </ul>
-    </section>
-
-    <section id="responses">
-      <h2>レスポンス</h2>
-
-      <h3>HtmlResponse</h3>
-      <pre><code>from nexom.web.response import HtmlResponse
-
-return HtmlResponse("&lt;h1&gt;OK&lt;/h1&gt;")</code></pre>
-
-      <h3>JsonResponse</h3>
-      <pre><code>from nexom.web.response import JsonResponse
-
-return JsonResponse({"ok": True, "message": "hello"})</code></pre>
-
-      <h3>低レベル Response（自由度重視）</h3>
-      <p>高度なことをしたい場合は <code>Response</code> を直接使います。</p>
-      <pre><code>from nexom.web.response import Response
-
-# バイナリや任意 Content-Type を返す
-return Response(
-    b"binary",
-    content_type="application/octet-stream",
-)</code></pre>
-
-      <h3>リダイレクト</h3>
-      <pre><code>from nexom.web.response import Redirect
-
-return Redirect("/to")</code></pre>
-
-      <h3>エラーレスポンス</h3>
-      <p>標準のエラーページテンプレートから HTML を生成します。</p>
-      <pre><code>from nexom.web.response import ErrorResponse
-
-return ErrorResponse(404, "Not Found")</code></pre>
-
-      <div class="note">
-        <strong>charset について:</strong>
-        Nexom は <code>str</code> の body を返すときに <code>charset</code> で <code>encode</code> します。<br>
-        <code>HtmlResponse</code> / <code>JsonResponse</code> は “短く書ける” 方向で、UTF-8 を前提に使える設計です。
-      </div>
-    </section>
-
-    <section id="templates">
-      <h2>テンプレート</h2>
-      <p>Nexom のテンプレートは「最小機能で予測可能」に寄せた独自構文です。</p>
-
-      <h3>変数展開</h3>
-      <pre><code>&lt;h1&gt;{{ title }}&lt;/h1&gt;</code></pre>
-
-      <h3>継承（Extends）と差し込み（Insert）</h3>
-      <pre><code>&lt;Extends base /&gt;
-&lt;Insert main&gt;
-  &lt;h1&gt;Hello&lt;/h1&gt;
-&lt;/Insert&gt;</code></pre>
-
-      <h3>部品読み込み（Import）</h3>
-      <pre><code>&lt;Import header /&gt;</code></pre>
-
-      <h3>Python 側から呼ぶ</h3>
-      <pre><code>from nexom.web.template import Templates
-
-templates = Templates("./templates", "default", "document")
-
-html = templates.default(title="Nexom")
-return HtmlResponse(html)</code></pre>
-
-      <div class="note">
-        <strong>設計方針:</strong> テンプレートにロジックを入れず、「HTML と差し込み」に寄せることで、コード側をシンプルに保つ思想です。
-      </div>
-    </section>
-
-    <section id="cli">
-      <h2>CLI</h2>
-
-      <h3>動作確認</h3>
-      <pre><code>python -m nexom test</code></pre>
-
-      <h3>サーバープロジェクト生成</h3>
-      <pre><code>python -m nexom build-server myapp</code></pre>
-
-      <p>生成されるプロジェクトには以下が含まれます（構成はバージョンにより変わる場合があります）。</p>
-      <ul>
-        <li>最小のルーティング定義</li>
-        <li>テンプレート一式</li>
-        <li>静的ファイル用ディレクトリ</li>
-        <li>gunicorn / config の雛形</li>
-      </ul>
-    </section>
-
-    <section id="tips">
-      <h2>運用のコツ</h2>
-
-      <h3>「短く書く層」と「脱出口」を分ける</h3>
-      <ul>
-        <li>普段: <code>HtmlResponse</code> / <code>JsonResponse</code> を使う</li>
-        <li>詰めたい: <code>Response</code> で headers / content-type を直接制御</li>
-      </ul>
-
-      <h3>ルーティングは “薄く”</h3>
-      <p>handler 内で複雑化しそうなら、関数を分けて「処理の塊」を小さくするのが Nexom と相性良いです。</p>
-
-      <h3>テストのおすすめ</h3>
-      <p>公開運用を想定するなら、最低限この3つのテストを用意すると安心です。</p>
-      <ul>
-        <li>Path の引数抽出</li>
-        <li>Static の traversal ブロック</li>
-        <li>Response の Content-Type / charset の期待値</li>
-      </ul>
-    </section>
+sudo systemd start banana-project@banana1
+sudo systemd start banana-project@banana2
+sudo systemd start banana-project@banana3
+</code></pre><p>2026 1/27</p>
+</div>
 </Insert>
