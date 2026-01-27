@@ -126,18 +126,18 @@
   <div class="wrap">
     <section class="card">
       <h1>Login</h1>
-      <p class="sub">ログインすると cookie (<code>_nxt</code>) を保存して、トップページへ戻ります。</p>
+      <p class="sub">アカウントにログイン</p>
 
       <form id="form">
-        <label for="user_id">user_id</label>
+        <label for="user_id">ユーザーID</label>
         <input id="user_id" name="user_id" autocomplete="username" required />
 
-        <label for="password" style="margin-top:10px;">password</label>
+        <label for="password" style="margin-top:10px;">パスワード</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required />
 
         <div class="row">
-          <a class="link" href="/signup">signupへ</a>
-          <button id="btn" type="submit">login</button>
+          <a class="link" href="/signup">まだアカウントを持っていない場合</a>
+          <button id="btn" type="submit">ログイン</button>
         </div>
 
         <div id="msg" class="msg"></div>
@@ -147,6 +147,29 @@
 
   <script>
     const AUTH_BASE = "";
+
+    const error_code_for_message = {
+      // ===== Auth errors =====
+      "A01": "フォームの入力内容に不足があります。",
+      "A02": "このユーザーIDはすでに使用されています。",
+      "A03": "ユーザーIDまたはパスワードが正しくありません。",
+      "A04": "このユーザーは無効化されています。",
+      "A05": "認証情報が見つかりません。再度ログインしてください。",
+      "A06": "認証情報が不正です。再度ログインしてください。",
+      "A07": "セッションの有効期限が切れています。再度ログインしてください。",
+      "A08": "このセッションは無効化されています。再度ログインしてください。",
+      "A09": "認証サービスに接続できません。しばらく時間をおいて再度お試しください。",
+
+      // fallback
+      "DEFAULT": "エラーが発生しました。もう一度お試しください。"
+    };
+    function getErrorMessage(code) {
+      if (typeof code !== "string") {
+        return error_code_for_message.DEFAULT;
+      }
+    
+      return error_code_for_message[code] ?? error_code_for_message.DEFAULT;
+    }
 
     const form = document.getElementById("form");
     const btn = document.getElementById("btn");
@@ -158,7 +181,7 @@
     }
     function setError(text){
       msg.className = "msg is-error";
-      msg.textContent = text;
+      msg.textContent = getErrorMessage(text);
     }
 
     async function postJSON(path, bodyObj){
@@ -191,7 +214,6 @@
 
       btn.disabled = true;
       try{
-        // 重要: AuthServiceに直接ではなく「今いるアプリ」にPOST
         const r = await postJSON("/login", { user_id, password });
 
         if (!r.ok || !r.data || r.data.ok !== true){
@@ -200,8 +222,6 @@
           return;
         }
 
-        // 成功: cookie はサーバー側が Set-Cookie で付ける想定
-        // トップへ戻す
         location.href = "/";
       }catch{
         setError("NetworkError");

@@ -67,6 +67,9 @@
       gap:10px;
     }
     .grid .full{ grid-column:1 / -1; }
+    @media (max-width: 480px){
+      .grid .hurf{ grid-column:1 / -1; }
+    }
 
     label{
       display:block;
@@ -172,40 +175,40 @@
   <div class="wrap">
     <section class="card">
       <h1>Signup</h1>
-      <p class="sub">アカウントを作成します。作成後、ボタンでログイン画面へ移動します。</p>
+      <p class="sub">アカウントを作成</p>
 
       <form id="form">
         <div class="grid">
           <div class="full">
-            <label for="user_id">user_id</label>
+            <label for="user_id">ユーザーID</label>
             <input id="user_id" name="user_id" autocomplete="username" required />
           </div>
 
           <div class="full">
-            <label for="public_name">public_name</label>
+            <label for="public_name">公開名</label>
             <input id="public_name" name="public_name" autocomplete="nickname" required />
           </div>
 
-          <div>
-            <label for="password">password</label>
+          <div class="hurf">
+            <label for="password">パスワード</label>
             <input id="password" name="password" type="password" autocomplete="new-password" required />
           </div>
-          <div>
-            <label for="password2">password (confirm)</label>
+          <div class="hurf">
+            <label for="password2">パスワード (確認)</label>
             <input id="password2" name="password2" type="password" autocomplete="new-password" required />
           </div>
         </div>
 
         <div class="row">
-          <a class="link" href="/login">loginへ</a>
-          <button id="btn" type="submit">create</button>
+          <a class="link" href="/login">アカウントがある場合</a>
+          <button id="btn" type="submit">作成</button>
         </div>
 
         <div id="msg" class="msg"></div>
 
         <div id="okPanel" class="okPanel">
           <div class="okTitle">アカウントが作成されました</div>
-          <p class="okText">続けてログインしてください。</p>
+          <p class="okText">ログインしてください</p>
           <button id="toLogin" class="okBtn" type="button">ログイン画面へ</button>
         </div>
       </form>
@@ -214,6 +217,29 @@
 
   <script>
     const AUTH_BASE = "";
+
+    const error_code_for_message = {
+      // ===== Auth errors =====
+      "A01": "フォームの入力内容に不足があります。",
+      "A02": "このユーザーIDはすでに使用されています。",
+      "A03": "ユーザーIDまたはパスワードが正しくありません。",
+      "A04": "このユーザーは無効化されています。",
+      "A05": "認証情報が見つかりません。再度ログインしてください。",
+      "A06": "認証情報が不正です。再度ログインしてください。",
+      "A07": "セッションの有効期限が切れています。再度ログインしてください。",
+      "A08": "このセッションは無効化されています。再度ログインしてください。",
+      "A09": "認証サービスに接続できません。しばらく時間をおいて再度お試しください。",
+
+      // fallback
+      "DEFAULT": "エラーが発生しました。もう一度お試しください。"
+    };
+    function getErrorMessage(code) {
+      if (typeof code !== "string") {
+        return error_code_for_message.DEFAULT;
+      }
+    
+      return error_code_for_message[code] ?? error_code_for_message.DEFAULT;
+    }
 
     const form = document.getElementById("form");
     const btn = document.getElementById("btn");
@@ -227,7 +253,7 @@
     }
     function setError(text){
       msg.className = "msg is-error";
-      msg.textContent = text;
+      msg.textContent = getErrorMessage(text);
     }
 
     async function postJSON(path, bodyObj){
