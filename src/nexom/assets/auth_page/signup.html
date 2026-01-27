@@ -200,7 +200,7 @@
         </div>
 
         <div class="row">
-          <a class="link" href="/login">アカウントがある場合</a>
+          <a class="link" href="./login">アカウントがある場合</a>
           <button id="btn" type="submit">作成</button>
         </div>
 
@@ -216,7 +216,8 @@
   </div>
 
   <script>
-    const AUTH_BASE = "";
+    const AUTH_BASE = ""
+    const PAGE_PATH = "/{{ page_path }}"
 
     const error_code_for_message = {
       // ===== Auth errors =====
@@ -294,7 +295,7 @@
 
       btn.disabled = true;
       try{
-        const r = await postJSON("/signup", { user_id, public_name, password });
+        const r = await postJSON(PAGE_PATH, { user_id, public_name, password });
 
         if (!r.ok || !r.data || r.data.ok !== true) {
 
@@ -313,7 +314,7 @@
     });
 
     toLogin.addEventListener("click", () => {
-      location.href = "/login";
+      location.href = "./login";
     });
   </script>
 </body>

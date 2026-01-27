@@ -148,7 +148,7 @@ class Static(Path):
 # Pathlib
 # ====================
 
-class Pathlib(list[Path]):
+class Router(list[Path]):
     """Collection of Path objects with middleware support."""
 
     def __init__(self, *paths: Path) -> None:

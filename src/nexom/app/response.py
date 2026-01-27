@@ -111,7 +111,7 @@ class JsonResponse(Response):
             cookie=cookie,
             content_type=content_type,
             charset=charset,
-            include_charset=False,  # ここは自前で付けたからFalse
+            include_charset=False,
         )
 
 class Redirect(Response):
@@ -119,11 +119,20 @@ class Redirect(Response):
     HTTP redirect response (302).
     """
 
-    def __init__(self, location: str) -> None:
+    def __init__(
+        self,
+        location: str,
+        headers: Iterable[Header] | None = None,
+        cookie: str | None = None,
+    ) -> None:
+        extra = list(headers) if headers else []
+        res_headers = [("Location", location), *extra]
+
         super().__init__(
             body=b"",
             status=302,
-            headers=[("Location", location)],
+            headers=res_headers,
+            cookie=cookie,
         )
 
 

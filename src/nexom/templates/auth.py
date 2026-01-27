@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from importlib import resources
+import pathlib as plb
 
 from ..app.auth import AuthClient, KEY_NAME
 from ..app.request import Request
+from ..app.response import HtmlResponse, JsonResponse, Redirect, ErrorResponse
 from ..app.cookie import Cookie
-from ..app.response import HtmlResponse, JsonResponse
+from ..app.path import Path, Router
 from ..core.object_html_render import HTMLDoc, ObjectHTML
 from ..core.error import NexomError, _status_for_auth_error
 
@@ -31,13 +33,41 @@ _OHTML: ObjectHTML = ObjectHTML(
 # Pages
 # --------------------
 
-class LoginPage:
-    def __init__(self, auth_server: str) -> None:
+class AuthPages(Path):
+    def __init__(self,
+        path: str,
+        auth_server: str,
+        *,
+        login_path: str = "login/",
+        signup_path: str = "signup/",
+        logout_path: str = "logout/"
+    ):
+        self.auth_server = auth_server
+
+        root = plb.Path(path)
+        self.routing = Router(
+            LoginPage(str(root / login_path), self.auth_server),
+            SignupPage(str(root / signup_path), self.auth_server),
+            LogoutPage(str(root / logout_path), self.auth_server),
+        )
+
+        super().__init__(path, self._handler, "UserAuthPage")
+
+    def _handler(self, req: Request, args: dict) -> JsonResponse:
+
+        p = self.routing.get(req.path)
+        return p.call_handler(req)
+
+
+class LoginPage(Path):
+    def __init__(self, path: str, auth_server: str) -> None:
+        super().__init__(path, self._handler, "LoginPage")
+
         self.client = AuthClient(auth_server)
 
-    def page(self, req: Request, args: dict) -> HtmlResponse | JsonResponse:
+    def _handler(self, req: Request, args: dict) -> JsonResponse:
         if req.method == "GET":
-            return HtmlResponse(_OHTML.render("login"))
+            return HtmlResponse(_OHTML.render("login", page_path=req.path))
 
         try:
             data = req.json() or {}
@@ -53,15 +83,16 @@ class LoginPage:
 
         except Exception:
             return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
+        
+class SignupPage(Path):
+    def __init__(self, path: str, auth_server: str) -> None:
+        super().__init__(path, self._handler, "SignupPage")
 
-
-class SignupPage:
-    def __init__(self, auth_server: str) -> None:
         self.client = AuthClient(auth_server)
 
-    def page(self, req: Request, args: dict) -> HtmlResponse | JsonResponse:
+    def _handler(self, req: Request, args: dict) -> JsonResponse:
         if req.method == "GET":
-            return HtmlResponse(_OHTML.render("signup"))
+            return HtmlResponse(_OHTML.render("signup", page_path=req.path))
 
         try:
             data = req.json() or {}
@@ -77,3 +108,31 @@ class SignupPage:
 
         except Exception:
             return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
+        
+
+class LogoutPage(Path):
+    def __init__(self, path: str, auth_server: str) -> None:
+        super().__init__(path, self._handler, "LogoutPage")
+        self.client = AuthClient(auth_server)
+
+    def _handler(self, req: Request, args: dict) -> Redirect | ErrorResponse:
+        if req.method != "GET":
+            return ErrorResponse(405, "Please make a GET request")
+
+        token = req.cookie.get(KEY_NAME) if req.cookie else None
+
+        redirect_url = req.headers.get("referer") or "/"
+        if not redirect_url.startswith("/"):
+            redirect_url = "/"
+
+        if token:
+            try:
+                self.client.logout(token=token)
+            except NexomError as e:
+                return ErrorResponse(500, e.code)
+            except Exception as e:
+                return ErrorResponse(500, str(e))
+
+        set_cookie = Cookie(KEY_NAME, "", Path="/", MaxAge=0)
+        return Redirect(redirect_url, cookie=str(set_cookie))
+

@@ -15,7 +15,7 @@ from urllib.error import URLError, HTTPError
 from .request import Request
 from .response import JsonResponse
 from .db import DatabaseManager
-from .path import Path, Pathlib
+from .path import Path, Router
 from ..core.log import AuthLogger
 
 from ..core.error import (
@@ -111,7 +111,7 @@ class AuthService:
         def _p(x: str) -> str:
             return f"{p}/{x}".strip("/") if p else x
 
-        self.routing = Pathlib(
+        self.routing = Router(
             Path(_p("signup"), self.signup, "AuthSignup"),
             Path(_p("login"), self.login, "AuthLogin"),
             Path(_p("logout"), self.logout, "AuthLogout"),

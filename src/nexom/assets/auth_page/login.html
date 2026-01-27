@@ -136,7 +136,7 @@
         <input id="password" name="password" type="password" autocomplete="current-password" required />
 
         <div class="row">
-          <a class="link" href="/signup">まだアカウントを持っていない場合</a>
+          <a class="link" href="./signup">まだアカウントを持っていない場合</a>
           <button id="btn" type="submit">ログイン</button>
         </div>
 
@@ -146,7 +146,8 @@
   </div>
 
   <script>
-    const AUTH_BASE = "";
+    const AUTH_BASE = ""
+    const PAGE_PATH = "/{{ page_path }}"
 
     const error_code_for_message = {
       // ===== Auth errors =====
@@ -214,7 +215,7 @@
 
       btn.disabled = true;
       try{
-        const r = await postJSON("/login", { user_id, password });
+        const r = await postJSON(PAGE_PATH, { user_id, password });
 
         if (!r.ok || !r.data || r.data.ok !== true){
           const code = (r.data && r.data.error) ? String(r.data.error) : "UnknownError";

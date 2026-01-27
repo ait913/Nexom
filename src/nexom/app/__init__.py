@@ -16,7 +16,7 @@ from .response import (
 )
 
 # ---- Routing ----
-from .path import Path, Static, Pathlib
+from .path import Path, Static, Router
 
 # ---- Cookie ----
 from .cookie import Cookie, RequestCookies

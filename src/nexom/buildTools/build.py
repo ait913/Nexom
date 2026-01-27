@@ -125,7 +125,7 @@ def create_app(
 
     # static
     static_pkg = "nexom.assets.app.static"
-    for fn in ("dog.jpeg", "style.css"):
+    for fn in ("dog.jpeg", "github.png", "style.css"):
         _copy_from_package(static_pkg, fn, static_dir / fn)
 
     # app files
