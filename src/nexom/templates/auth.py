@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from importlib import resources
 
-from ..app.auth import AuthClient
+from ..app.auth import AuthClient, KEY_NAME
 from ..app.request import Request
+from ..app.cookie import Cookie
 from ..app.response import HtmlResponse, JsonResponse
 from ..core.object_html_render import HTMLDoc, ObjectHTML
 from ..core.error import NexomError, _status_for_auth_error
@@ -44,8 +45,9 @@ class LoginPage:
                 user_id=str(data.get("user_id") or ""),
                 password=str(data.get("password") or ""),
             )
-            return JsonResponse({"ok": True, "user_id": user_id, "token": token, "expires_at": exp})
 
+            set_cookie = Cookie(KEY_NAME, token, Path="/", MaxAge=exp)
+            return JsonResponse({"ok": True, "user_id": user_id, "token": token, "expires_at": exp}, cookie=str(set_cookie))
         except NexomError as e:
             return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
 

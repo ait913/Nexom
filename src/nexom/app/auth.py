@@ -65,6 +65,13 @@ def _token_hash(token: str) -> str:
 
 
 # --------------------
+# variables (internal)
+# --------------------
+
+KEY_NAME = "_nxt"
+
+
+# --------------------
 # models (internal)
 # --------------------
 
