@@ -32,11 +32,12 @@ pip install
 ```
 **プロジェクトのビルド**
 
-プロジェクトディレクトリ上で、以下のコマンドを実行してください(名前は自由)
+プロジェクトディレクトリ上で、以下のコマンドを実行してください
+
 もしNginxもしくはApacheを使用する場合 --gateway オプションにどちらか入力してください
 
 ```
-$ python -m nexom start-project
+$ python -m nexom start-project # --gateway nginx or apache
 ```
 
 以下の構成でプロジェクトが生成されます。
@@ -80,7 +81,7 @@ $ python -m nexom run
 ブラウザからアクセスできるようになります。
 デフォルトのポートは8080です。
 
-[https://localhost:8080](https://localhost:8080)
+[http://localhost:8080](http://localhost:8080)
 
 ポートなどの設定は `config.py` から変更してください。
 
@@ -154,4 +155,4 @@ sudo systemd start banana-project@banana2
 sudo systemd start banana-project@banana3
 ```
 
-2026 1/27
+2026 1/28
