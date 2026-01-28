@@ -76,13 +76,21 @@ KEY_NAME = "_nxt"
 # --------------------
 
 @dataclass
-class Session:
+class LocalSession:
     sid: str
     uid: str
     user_id: str
     token: str
     expires_at: int
     revoked_at: int | None
+    user_agent: str | None
+
+@dataclass
+class Session:
+    pid: str
+    user_id: str
+    token: str
+    expires_at: int
     user_agent: str | None
 
 
@@ -131,7 +139,7 @@ class AuthService:
             status = _status_for_auth_error(e.code)
             return JsonResponse({"ok": False, "error": e.code}, status=status)
 
-        except Exception:
+        except Exception as e:
             return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
 
     # ---- handlers ----
@@ -156,7 +164,7 @@ class AuthService:
         user_id = str(data.get("user_id") or "").strip()
         password = str(data.get("password") or "")
 
-        sess = self.dbm.login(
+        lsess = self.dbm.login(
             user_id,
             password,
             user_agent=request.headers.get("user-agent"),
@@ -166,9 +174,11 @@ class AuthService:
         return JsonResponse(
             {
                 "ok": True,
-                "user_id": sess.user_id,
-                "token": sess.token,
-                "expires_at": sess.expires_at,
+                "pid":lsess.uid,
+                "user_id": lsess.user_id,
+                "token": lsess.token,
+                "expires_at": lsess.expires_at,
+                "user_agent": lsess.user_agent
             }
         )
 
@@ -186,15 +196,17 @@ class AuthService:
             return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
 
         token = str((request.json() or {}).get("token") or "")
-        sess = self.dbm.verify(token)
-        if not sess:
+        lsess = self.dbm.verify(token)
+        if not lsess:
             return JsonResponse({"active": False}, status=200)
 
         return JsonResponse(
             {
                 "active": True,
-                "user_id": sess.user_id,
-                "expires_at": sess.expires_at,
+                "pid":lsess.uid,
+                "user_id": lsess.user_id,
+                "expires_at": lsess.expires_at,
+                "user_agent": lsess.user_agent
             },
             status=200,
         )
@@ -256,21 +268,20 @@ class AuthClient:
             return 
         self._raise_from_error_code(str(d.get("error") or ""))
 
-    def login(self, *, user_id: str, password: str) -> tuple[str, str, int]:
+    def login(self, *, user_id: str, password: str) -> Session:
         d = self._post(self.login_url, {"user_id": user_id, "password": password})
         if not d.get("ok"):
             self._raise_from_error_code(str(d.get("error") or ""))
 
-        return str(d["token"]), str(d["user_id"]), int(d["expires_at"])
+        return Session(str(d["pid"]), str(d["user_id"]), str(d["token"]), int(d["expires_at"]), str(d["user_agent"]))
 
-    def verify_token(self, *, token: str) -> tuple[bool, Optional[str], Optional[int]]:
+    def verify_token(self, *, token: str) -> Session | None:
         d = self._post(self.verify_url, {"token": token})
 
         if d.get("active") is True:
-            return True, str(d["user_id"]), int(d["expires_at"])
+            return Session(str(d["pid"]), str(d["user_id"]), token, int(d["expires_at"]), str(d["user_agent"]))
 
-        # active False は正常系扱い
-        return False, None, None
+        return None
 
     def logout(self, *, token: str) -> None:
         d = self._post(self.logout_url, {"token": token})
@@ -367,7 +378,7 @@ class AuthDBM(DatabaseManager):
         except Exception as e:
             raise AuthServiceUnavailableError()
 
-    def login(self, user_id: str, password: str, *, user_agent: str | None, ttl_sec: int) -> Session:
+    def login(self, user_id: str, password: str, *, user_agent: str | None, ttl_sec: int) -> LocalSession:
         if not user_id:
             raise AuthMissingFieldError("user_id")
         if not password:
@@ -401,7 +412,7 @@ class AuthDBM(DatabaseManager):
             user_agent,
         )
 
-        return Session(sid, uid, uid_text, token, exp, None, user_agent)
+        return LocalSession(sid, uid, uid_text, token, exp, None, user_agent)
 
     def logout(self, token: str) -> None:
         if not token:
@@ -413,7 +424,7 @@ class AuthDBM(DatabaseManager):
             _token_hash(token),
         )
 
-    def verify(self, token: str | None) -> Session | None:
+    def verify(self, token: str | None) -> LocalSession | None:
         if not token:
             return None
 
@@ -433,4 +444,4 @@ class AuthDBM(DatabaseManager):
         if rev or int(exp) <= _now():
             return None
 
-        return Session(str(sid), str(uid), str(user_id), str(token), int(exp), None, ua)
+        return LocalSession(str(sid), str(uid), str(user_id), str(token), int(exp), None, ua)

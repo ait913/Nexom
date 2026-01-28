@@ -84,7 +84,7 @@ class Path:
             return res
 
         except TypeError as e:
-            # handler の引数不足だけは明示的に
+            # handler の引数不足
             if re.search(r"takes \d+ positional arguments? but \d+ were given", str(e)):
                 raise PathHandlerMissingArgError()
             raise

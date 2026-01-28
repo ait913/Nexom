@@ -71,13 +71,13 @@ class LoginPage(Path):
 
         try:
             data = req.json() or {}
-            token, user_id, exp = self.client.login(
+            sess = self.client.login(
                 user_id=str(data.get("user_id") or ""),
                 password=str(data.get("password") or ""),
             )
 
-            set_cookie = Cookie(KEY_NAME, token, Path="/", MaxAge=exp)
-            return JsonResponse({"ok": True, "user_id": user_id, "token": token, "expires_at": exp}, cookie=str(set_cookie))
+            set_cookie = Cookie(KEY_NAME, sess.token, Path="/", MaxAge=sess.expires_at)
+            return JsonResponse({"ok": True, "user_id": sess.user_id, "token": sess.token, "expires_at": sess.expires_at}, cookie=str(set_cookie))
         except NexomError as e:
             return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
 
