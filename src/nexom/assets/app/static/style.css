@@ -564,7 +564,7 @@ pre {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--hevy-dark);
+  background: var(--black);
   border-radius: var(--mini-radius);
   overflow: hidden;
 }
