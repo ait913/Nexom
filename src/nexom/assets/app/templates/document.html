@@ -19,16 +19,13 @@
 cd banana_project
 
 python -m venv venv
-source venv/bin/activate
-</code></pre><h3 id="2-pipでインストール-サーバーのビルド">2. pipでインストール、サーバーのビルド </h3>
+source venv/bin/activate</code></pre><h3 id="2-pipでインストール-サーバーのビルド">2. pipでインストール、サーバーのビルド </h3>
 <p><strong>インストール</strong></p>
 <p>nexomをインストールします。</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>pip install
-</code></pre><p><strong>プロジェクトのビルド</strong></p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>pip install</code></pre><p><strong>プロジェクトのビルド</strong></p>
 <p>プロジェクトディレクトリ上で、以下のコマンドを実行してください(名前は自由)<br>
 もしNginxもしくはApacheを使用する場合 --gateway オプションにどちらか入力してください</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom start-project
-</code></pre><p>以下の構成でプロジェクトが生成されます。</p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom start-project</code></pre><p>以下の構成でプロジェクトが生成されます。</p>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>banana_project/
 ├─ app/
 │  ├─ pages/
@@ -56,20 +53,17 @@ source venv/bin/activate
    │  └─ * app db *
    └─ gateway/
       ├─ app.nginx.conf
-      └─ app.apache.conf
-</code></pre><h3 id="3起動">3.起動 </h3>
+      └─ app.apache.conf</code></pre><h3 id="3起動">3.起動 </h3>
 <p>以下のコマンドを起動します。</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom run
-</code></pre><p>ブラウザからアクセスできるようになります。<br>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom run</code></pre><p>ブラウザからアクセスできるようになります。<br>
 デフォルトのポートは8080です。</p>
-<p><a href="https://localhost:8080">https://localhost:8080</a></p>
+<p><a href="http://localhost:8080">http://localhost:8080</a></p>
 <p>ポートなどの設定は <code>config.py</code> から変更してください。</p>
 <h2 id="nginx等使用して外部公開する">Nginx等使用して外部公開する </h2>
 <p>gatewayディレクトリにある設定を読み込んでください</p>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>http {
     include /home/ubuntu/banana_project/gateway/*.conf;
-}
-</code></pre><h2 id="systemdに登録して自動起動する">Systemdに登録して自動起動する </h2>
+}</code></pre><h2 id="systemdに登録して自動起動する">Systemdに登録して自動起動する </h2>
 <p><strong>Ubuntuの場合</strong></p>
 <ol>
 <li><code>/etc/systemd/system</code> に、 <code>banana_sample.service</code> を作成します。</li>
@@ -89,12 +83,10 @@ ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn sample.wsgi:app --config
 Restart=always
 RestartSec=3
 [Install]
-WantedBy=multi-user.target
-</code></pre><p>以下のコマンドを実行します</p>
+WantedBy=multi-user.target</code></pre><p>以下のコマンドを実行します</p>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
 sudo systemd enable banana_sample
-sudo systemd start banana_sample
-</code></pre><h3 id="テンプレートユニットを活用して複数のアプリを効率的に管理">テンプレートユニットを活用して複数のアプリを効率的に管理 </h3>
+sudo systemd start banana_sample</code></pre><h3 id="テンプレートユニットを活用して複数のアプリを効率的に管理">テンプレートユニットを活用して複数のアプリを効率的に管理 </h3>
 <p>テンプレートユニットを活用し .service ファイルを一枚にまとめられます。</p>
 <p><code>/etc/systemd/system/banana-project@.service</code></p>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>[Unit]
@@ -110,8 +102,7 @@ ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn ％iwsgi:app --config %i
 Restart=always
 RestartSec=3
 [Install]
-WantedBy=multi-user.target
-</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
+WantedBy=multi-user.target</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
 
 sudo systemd enable banana-project@banana1
 sudo systemd enable banana-project@banana2
@@ -119,7 +110,6 @@ sudo systemd enable banana-project@banana3
 
 sudo systemd start banana-project@banana1
 sudo systemd start banana-project@banana2
-sudo systemd start banana-project@banana3
-</code></pre><p>2026 1/27</p>
+sudo systemd start banana-project@banana3</code></pre><p>2026 1/27</p>
 </div>
 </Insert>

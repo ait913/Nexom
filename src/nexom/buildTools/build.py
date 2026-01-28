@@ -168,6 +168,12 @@ def create_app(
     pages_templates_enabled = _replace_many(pages_templates_text, {"__app_name__": app_name})
     pages_templates_path.write_text(pages_templates_enabled, encoding="utf-8")
 
+    # pages/_templates.py
+    pages_templates_path = pages_dir / "default.py"
+    pages_templates_text = pages_templates_path.read_text(encoding="utf-8")
+    pages_templates_enabled = _replace_many(pages_templates_text, {"__app_name__": app_name})
+    pages_templates_path.write_text(pages_templates_enabled, encoding="utf-8")
+
     # gateway config (optional; only if gateway/ exists OR gateway_config explicitly given)
     if gateway_config:
         gw = project_root / "gateway"

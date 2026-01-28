@@ -80,6 +80,7 @@ class LocalSession:
     sid: str
     uid: str
     user_id: str
+    public_name: str
     token: str
     expires_at: int
     revoked_at: int | None
@@ -89,6 +90,7 @@ class LocalSession:
 class Session:
     pid: str
     user_id: str
+    public_name: str
     token: str
     expires_at: int
     user_agent: str | None
@@ -176,6 +178,7 @@ class AuthService:
                 "ok": True,
                 "pid":lsess.uid,
                 "user_id": lsess.user_id,
+                "public_name":lsess.public_name,
                 "token": lsess.token,
                 "expires_at": lsess.expires_at,
                 "user_agent": lsess.user_agent
@@ -205,6 +208,7 @@ class AuthService:
                 "active": True,
                 "pid":lsess.uid,
                 "user_id": lsess.user_id,
+                "public_name":lsess.public_name,
                 "expires_at": lsess.expires_at,
                 "user_agent": lsess.user_agent
             },
@@ -273,13 +277,13 @@ class AuthClient:
         if not d.get("ok"):
             self._raise_from_error_code(str(d.get("error") or ""))
 
-        return Session(str(d["pid"]), str(d["user_id"]), str(d["token"]), int(d["expires_at"]), str(d["user_agent"]))
+        return Session(str(d["pid"]), str(d["user_id"]), str(d["public_name"]), str(d["token"]), int(d["expires_at"]), str(d["user_agent"]))
 
-    def verify_token(self, *, token: str) -> Session | None:
+    def verify_token(self, token: str) -> Session | None:
         d = self._post(self.verify_url, {"token": token})
 
         if d.get("active") is True:
-            return Session(str(d["pid"]), str(d["user_id"]), token, int(d["expires_at"]), str(d["user_agent"]))
+            return Session(str(d["pid"]), str(d["user_id"]), str(d["public_name"]), token, int(d["expires_at"]), str(d["user_agent"]))
 
         return None
 
@@ -385,13 +389,13 @@ class AuthDBM(DatabaseManager):
             raise AuthMissingFieldError("password")
 
         rows = self.execute(
-            "SELECT uid, user_id, password_hash, password_salt, is_active FROM users WHERE user_id=?",
+            "SELECT uid, user_id, public_name, password_hash, password_salt, is_active FROM users WHERE user_id=?",
             user_id,
         )
         if not rows:
             raise AuthInvalidCredentialsError()
 
-        uid, uid_text, pw_hash, salt, active = rows[0]
+        uid, user_id, public_name, pw_hash, salt, active = rows[0]
         if not active:
             raise AuthUserDisabledError()
 
@@ -412,7 +416,7 @@ class AuthDBM(DatabaseManager):
             user_agent,
         )
 
-        return LocalSession(sid, uid, uid_text, token, exp, None, user_agent)
+        return LocalSession(sid, uid, user_id, public_name, token, exp, None, user_agent)
 
     def logout(self, token: str) -> None:
         if not token:
@@ -430,7 +434,7 @@ class AuthDBM(DatabaseManager):
 
         rows = self.execute(
             """
-            SELECT s.sid, s.uid, u.user_id, s.expires_at, s.revoked_at, s.user_agent
+            SELECT s.sid, s.uid, u.user_id, u.public_name, s.expires_at, s.revoked_at, s.user_agent
             FROM sessions s
             JOIN users u ON u.uid=s.uid
             WHERE s.token_hash=?
@@ -440,8 +444,8 @@ class AuthDBM(DatabaseManager):
         if not rows:
             return None
 
-        sid, uid, user_id, exp, rev, ua = rows[0]
+        sid, uid, user_id, public_name, exp, rev, ua = rows[0]
         if rev or int(exp) <= _now():
             return None
 
-        return LocalSession(str(sid), str(uid), str(user_id), str(token), int(exp), None, ua)
+        return LocalSession(str(sid), str(uid), str(user_id), str(public_name), str(token), int(exp), None, ua)

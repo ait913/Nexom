@@ -1,8 +1,15 @@
 <Extends base />
 <Insert main>
     <div class="thumbnail-container">
-        <h1>Welcome Nexom v1.05 Deeeeeeeev</h1>
-        <p>How are you? I'm fine! Thank you!</p>
+        <div class="message-card">
+            <h1>Welcome Nexom v1.05 Deeeeeeeev</h1>
+            <p>How are you? I'm fine! Thank you!</p>
+        </div>
+        <div class="accounts-card">
+            <div id="ac1"><b>{{ user_message }}</b></div>
+            <a id="ac2" class="btn btn-p" href="/user/signup">Signup</a>
+            <a id="ac3" class="btn" href="/user/login">Login</a>
+        </div>
     </div>
     <div class="container">
         <p><a href="/static/dog.jpeg">Dog🐕</a> or <a href="/doc">Doc📕</a></p>

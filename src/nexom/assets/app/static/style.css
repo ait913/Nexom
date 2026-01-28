@@ -520,8 +520,8 @@ textarea,
 }
 
 :root {
-  --mini-border: var(--s2);
-  --regular-border: var(--s3);
+  --mini-radius: var(--s2);
+  --regular-radius: var(--s3);
 }
 
 :root {
@@ -545,7 +545,7 @@ pre {
   padding-inline: var(--s2);
   background-color: var(--hevy-dark);
   color: var(--white);
-  border-radius: var(--mini-border);
+  border-radius: var(--mini-radius);
 }
 
 .header-wrapper {
@@ -565,7 +565,7 @@ pre {
   justify-content: space-between;
   align-items: center;
   background: var(--hevy-dark);
-  border-radius: var(--mini-border);
+  border-radius: var(--mini-radius);
   overflow: hidden;
 }
 .header-speacer {
@@ -625,12 +625,62 @@ main {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: var(--s5);
   align-items: center;
-  border-radius: var(--regular-border);
+  border-radius: var(--regular-radius);
   overflow: hidden;
 }
 
 .article-container {
   width: 600px;
   max-width: 100%;
-}/*# sourceMappingURL=style.css.map */
+}
+
+.message-card{
+  text-align: center;
+}
+
+.accounts-card{
+  padding: var(--s2);
+  border: var(--light-dark) solid 1px;
+  border-radius: var(--regular-radius);
+
+  display: grid;
+  grid-template-columns: 1fr var(--s2) 1fr;
+  gap: var(--s1);
+}
+
+#ac1{
+  grid-column: 1 / -1;
+
+  margin-block-end: var(--s1);
+  font-size: 1.2rem;
+  text-align: center;
+}
+#ac2{
+  grid-column: 1 / 2;
+}
+#ac3{
+  grid-column: 3 / -1;
+}
+
+.btn {
+  padding-block: var(--s2);
+  padding-inline: var(--s3);
+
+  border: var(--light-dark) solid 1px;
+  border-radius: var(--mini-radius);
+
+  color: var(--black);
+  text-decoration: none;
+}
+
+.btn:hover{
+  box-shadow: 0 0 15px var(--light-dark);
+  transition: .3s;
+}
+
+.btn-p{
+  background-color: var(--hevy-dark);
+  color: var(--white);
+}
