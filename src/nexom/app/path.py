@@ -193,3 +193,9 @@ class Router(list[Path]):
         if self.raise_if_not_exist:
             raise PathNotFoundError(request_path)
         return None
+
+    def handle(self, request: Request) -> Response:
+        path = self.get(request.path, method=request.method)
+        if path is None:
+            raise PathNotFoundError(request.path)
+        return path.call_handler(request, tuple(self.middlewares))

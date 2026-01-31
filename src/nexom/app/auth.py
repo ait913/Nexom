@@ -133,8 +133,7 @@ class AuthService:
     def handler(self, environ: dict) -> JsonResponse:
         req = Request(environ)
         try:
-            route = self.routing.get(req.path)
-            return route.call_handler(req)
+            return self.routing.handle(req)
 
         except NexomError as e:
             # error code -> proper HTTP status

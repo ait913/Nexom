@@ -39,8 +39,7 @@ def app(environ: dict, start_response: Callable) -> Iterable[bytes]:
         path = req.path
         method = req.method
 
-        p = routing.get(path, method=method)
-        res = p.call_handler(req)
+        res = routing.handle(req)
 
     except PathNotFoundError as e:
         logger.warn(str(e))

@@ -62,6 +62,9 @@ class Response:
         """
         yield self.body
 
+    def append_header(self, key: str, value: str) -> None:
+        self.headers.append((key, value))
+
 class HtmlResponse(Response):
     def __init__(
         self,
