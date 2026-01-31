@@ -110,9 +110,24 @@ class CORSMiddleware:
         if self.allow_credentials:
             res.append_header("Access-Control-Allow-Credentials", "true")
 
-        # Allow-Methods / Allow-Headers（特に preflight で必要）
-        res.append_header("Access-Control-Allow-Methods", ", ".join(self.allowed_methods))
-        res.append_header("Access-Control-Allow-Headers", ", ".join(self.allowed_headers))
+        # Allow-Methods
+        if self.allowed_methods == ["*"]:
+            req_method = request.headers.get("access-control-request-method")
+            res.append_header("Access-Control-Allow-Methods", req_method or "GET, POST, PUT, DELETE, OPTIONS")
+        else:
+            res.append_header("Access-Control-Allow-Methods", ", ".join(self.allowed_methods))
+        
+        # Allow-Headers
+        if self.allowed_headers == ["*"]:
+            req_headers = request.headers.get("access-control-request-headers")
+            # ブラウザが要求してきたヘッダをそのまま許可
+            if req_headers:
+                res.append_header("Access-Control-Allow-Headers", req_headers)
+            else:
+                res.append_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        else:
+            res.append_header("Access-Control-Allow-Headers", ", ".join(self.allowed_headers))
+
 
         if self.max_age is not None:
             res.append_header("Access-Control-Max-Age", str(self.max_age))
