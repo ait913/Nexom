@@ -48,7 +48,7 @@ class Path:
                 self.path_args[idx] = m.group(1)
 
         if detection_index == 0:
-            detection_index = len(path_segments)
+            detection_index = 0 if path == "" else len(path_segments)
 
         self.path: str = "/".join(path_segments[:detection_index])
         self.detection_range: int = detection_index
