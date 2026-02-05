@@ -33,6 +33,7 @@ class Cookie:
         for k, v in self.attributes.items():
             if v is None:
                 continue
+            k = k.replace("_", "-")
             parts.append(f"{k}={v};")
         if self.http_only:
             parts.append("HttpOnly;")
