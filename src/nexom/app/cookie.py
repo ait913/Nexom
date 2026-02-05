@@ -16,19 +16,23 @@ class Cookie:
         *,
         http_only: bool = True,
         secure: bool = True,
-        **kwargs: str | int,
+        **kwargs: str | int | None,
     ) -> None:
-        if name is None:
-            raise CookieInvalidValueError("Cookie name cannot be None")
+        if not name:
+            raise CookieInvalidValueError("Cookie name cannot be empty or None")
+        if "\r" in value or "\n" in value:
+            raise CookieInvalidValueError("Cookie value contains invalid characters")
         self.name: str = name
         self.value: str = value
         self.http_only: bool = http_only
         self.secure: bool = secure
-        self.attributes: dict[str, str | int] = kwargs
+        self.attributes: dict[str, str | int | None] = kwargs
 
     def __repr__(self) -> str:
         parts = [f"{self.name}={self.value};"]
         for k, v in self.attributes.items():
+            if v is None:
+                continue
             parts.append(f"{k}={v};")
         if self.http_only:
             parts.append("HttpOnly;")
