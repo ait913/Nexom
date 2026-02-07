@@ -318,3 +318,38 @@ def _status_for_auth_error(code: str) -> int:
         "A08": 401,  # token revoked
         "A09": 503,  # auth service unavailable
     }.get(code, 400)
+    
+    
+
+# =========================
+# ParallelStorage
+# =========================
+class PsStatusTypesError(NexomError):
+    """This error occurs when the FileStatus value is invalid."""
+    def __init__(self, status) -> None:
+        super().__init__("PS01", f"This FileStatus value is invalid {str(status)}")
+        
+class PsFileStatusInvalidError(NexomError):
+    """This contents_id is not available."""
+    def __init__(self) -> None:
+        super().__init__("PS02", f"This File is status invalid.")
+        
+class PsFileStatusInvalidError(NexomError):
+    """This contents_id is not available."""
+    def __init__(self) -> None:
+        super().__init__("PS03", f"This File is status invalid.")
+        
+class PsArgmentsError(NexomError):
+    """Raised when an argument value is invalid"""
+    def __init__(self) -> None:
+        super().__init__("PS04", f"Argments value is invalid")
+        
+class PsPublicIDInvalidError(NexomError):
+    """Occurs when public_id is invalid"""
+    def __init__(self) -> None:
+        super().__init__("PS04", f"public_id is invalid")
+        
+class PsDataCorruotedError(NexomError):
+    """This occurs when data is corrupted."""
+    def __init__(self) -> None:
+        super().__init__("PS04", f"Data is corrupt")

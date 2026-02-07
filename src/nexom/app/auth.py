@@ -8,7 +8,6 @@ import time
 import hashlib
 import hmac
 import json
-import sqlite3
 from urllib.request import Request as UrlRequest, urlopen
 from urllib.error import URLError, HTTPError
 

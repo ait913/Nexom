@@ -74,10 +74,13 @@ class DatabaseManager:
         self._conn = None
         self._cursor = None
 
-    def commit(self) -> None:
+    def _commit(self) -> None:
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
         self._conn.commit()
+        
+    def commit(self) -> None:
+        self._commit()
 
     # ---- new canonical names ----
 
