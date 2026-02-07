@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Optional
+from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
 import json
@@ -10,6 +11,12 @@ from .cookie import RequestCookies
 
 WSGIEnviron = Mapping[str, Any]
 
+@dataclass(frozen=True)
+class File:
+    filename: str
+    content_type: str | None
+    size: int | None
+    file: Any
 
 class Request:
     """
@@ -48,7 +55,7 @@ class Request:
         self._body: bytes | None = None
         self._json_cache: Any | None = None
         self._form_cache: dict[str, list[str]] | None = None
-        self._files_cache: dict[str, Any] | None = None
+        self._files_cache: dict[str, str | File] | None = None
         self._multipart_consumed: bool = False
 
     # -------------------------
@@ -161,28 +168,49 @@ class Request:
         self._form_cache = parse_qs(raw.decode("utf-8"))
         return self._form_cache
 
-    def files(self) -> dict[str, Any] | None:
+    def files(self) -> dict[str, str | File] | None:
         """
-        Parse multipart/form-data using python-multipart.
+    Parse multipart/form-data using python-multipart.
 
         Returns:
-            dict[str, Any] mapping field name to either:
-              - str for normal form fields
-              - dict for file fields:
-                    {
-                        "filename": str,
-                        "content_type": str | None,
-                        "size": int | None,
-                        "file": <file-like object or bytes depending on backend>
-                    }
+            dict[str, str | File] or None.
+
+            - Returns None if Content-Type is not multipart/form-data.
+            - When multipart/form-data, returns a dict mapping each field name to:
+
+              1) Normal (non-file) field:
+                 - str
+
+              2) File field:
+                 - File dataclass
+
+                    File(
+                        filename: str,          # original filename from the multipart part
+                        content_type: str,      # Content-Type header of the part (can be None depending on parser/version)
+                        size: int,              # currently None (not calculated). keep for future use
+                        file: Any,              # file-like object or raw bytes depending on backend/parser
+                    )
+
+                 Notes about File.file:
+                 - If file-like, it usually supports .read() and returns bytes.
+                 - If raw bytes, it is already the full content of the uploaded file.
+                 - Treat File.file as opaque; convert to bytes by:
+                       src = f.file
+                       if hasattr(src, "read"): data = src.read()
+                       else: data = src
 
         Raises:
-            ModuleNotFoundError: if python-multipart is not installed.
-            ValueError: if Content-Type is multipart but parsing fails.
+            ModuleNotFoundError:
+                If python-multipart is not installed.
+            ValueError:
+                - If Content-Type is multipart/form-data but boundary is missing.
+                - If the body was already read via .read_body()/.json()/.form() before calling this method.
+                - If multipart parsing fails.
 
         IMPORTANT:
-            multipart parsing consumes wsgi.input. Do not call .read_body()/.json()/.form()
-            after calling this method.
+            This method consumes the WSGI input stream (environ["wsgi.input"]).
+            Do not call .read_body() / .json() / .form() after calling .files().
+            Also, do not call .files() after the body has been read (except empty body).
         """
         if self._files_cache is not None:
             return self._files_cache
@@ -222,7 +250,7 @@ class Request:
 
         parser = MultipartParser(stream, boundary.encode("utf-8"))
 
-        out: dict[str, Any] = {}
+        out: dict[str, str | File] = {}
 
         # MultipartParser yields parts; API differs slightly by version.
         # We handle common attributes: name, filename, headers, raw, file.
@@ -246,12 +274,21 @@ class Request:
                 fileobj = getattr(p, "file", None)
                 raw = getattr(p, "raw", None)
 
-                out[name] = {
-                    "filename": filename,
-                    "content_type": content_type,
-                    "size": None,
-                    "file": fileobj if fileobj is not None else raw,
-                }
+                # File オブジェクトに変更
+                #out[name] = {
+                #    "filename": filename,
+                #    "content_type": content_type,
+                #    "size": None,
+                #    "file": fileobj if fileobj is not None else raw,
+                #}
+                
+                out[name] = File(
+                    filename=filename,
+                    content_type=content_type,
+                    size=None,
+                    file=fileobj if fileobj is not None else raw,
+                )
+                
             else:
                 # normal field
                 value = getattr(p, "value", None)
