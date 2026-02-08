@@ -10,7 +10,7 @@ import json
 
 from .db import DatabaseManager
 
-from ..core.error import PsStatusTypesError, PsFileStatusInvalidError, PsArgmentsError, PsPublicIDInvalidError, PsContentsIDInvalidError, PsDataCorruotedError, PsChunkEntityTooLargeError, PsPermissionError
+from ..core.error import PsStatusTypesError, PsFileStatusInvalidError, PsArgmentsError, PsPublicIDInvalidError, PsContentsIDInvalidError, PsDataCorruotedError, PsChunkEntityTooLargeError, PsPermissionError, PsFileTypesError
 
 chunk_max_size = 1024 * 1024 * 10
 
@@ -42,11 +42,62 @@ def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
     kwargs are sorted alphabetically by key.
     """
     if kwargs:
-        items = [f"{k}-{kwargs[k]}" for k in sorted(kwargs.keys())]
+        items = [f"{k}-{kwargs[k]}" for k in sorted(kwargs) if kwargs[k] is not None]
         tail = "__PSC_" + "_".join(items)
     else:
         tail = "__PSC_"
     return f"{contents_id}{tail}{suffix}"
+
+
+class ParallelStorage:
+    def __init__(self, db_file:str, contents_dir: str) -> None:
+        self.contents_dir = Path(contents_dir)
+        
+        self._PSDBM = ParallelStorageDBM(db_file)
+        
+    def format_psc_contents_id(self, public_id: str, **kwargs) -> Path:
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
+        return contents_actual_path.resolve()
+    
+    def comp_img(self, public_id: str, width: int, height: int, quality: int) -> Path:
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        if not fMeta.isTypes("Images"):
+            raise PsFileTypesError()
+        
+        if width <= 0 or height <= 0:
+            raise PsArgmentsError()
+        if quality < 1 or quality > 100:
+            raise PsArgmentsError()
+        
+        original_path = self.format_psc_contents_id(public_id)
+        cache_path = (self.contents_dir / format_psc_filename(
+            fMeta.contents_id, ".webp", width=width, height=height, quality=quality
+        )).resolve()
+        
+        # originalの画像を指定の値で圧縮し、cache_pathへ保存、返り値はcache_path
+        try:
+            from PIL import Image  # type: ignore
+        except Exception as e:
+            raise ModuleNotFoundError(
+                "Pillow is required for image compression. Install with: pip install Pillow"
+            ) from e
+        
+        self.contents_dir.mkdir(parents=True, exist_ok=True)
+        
+        with Image.open(str(original_path)) as im:
+            im = im.convert("RGB")
+            if im.size != (width, height):
+                im = im.resize((width, height), Image.LANCZOS)
+            im.save(str(cache_path), format="WEBP", quality=quality, method=6)
+        
+        return cache_path
+    
+    def update_suffix(self, public_id: str, suffix: str) -> None:
+        if not suffix.startswith("."):
+            raise PsArgmentsError()
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        self._PSDBM.update_suffix(fMeta.contents_id, suffix)
 
 
 @dataclass(frozen=True)
@@ -62,6 +113,11 @@ class FileMeta:
     permission_id: str | None
     creation_date: str
     last_access: str
+    
+    def isTypes(self, types: FileTypes) -> bool:
+        if types not in ("Documents", "Images", "Binary", "Media", "Dangerous"):
+            raise PsFileTypesError()
+        return types == self.types
 
 class ParallelStorageDBM(DatabaseManager):
     def __init__(self, db_file: str):
@@ -152,6 +208,12 @@ class ParallelStorageDBM(DatabaseManager):
         self.execute(
             "UPDATE parallel_storage SET types = ? WHERE contents_id = ?",
             types, contents_id
+        )
+        self.commit()
+    def update_suffix(self, contents_id: str, suffix: str) -> None:
+        self.execute(
+            "UPDATE parallel_storage SET suffix = ? WHERE contents_id = ?",
+            suffix, contents_id
         )
         self.commit()
         

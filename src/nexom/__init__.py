@@ -1,19 +1,54 @@
 """
 NEXOM - A lightweight Python web framework.
 
-NEXOM provides a simple and flexible foundation for building
-WSGI-based web applications with minimal overhead.
+Top-level public API exports the most commonly used application-layer types.
 """
 
 from __future__ import annotations
 
-from nexom.app.request import Request
-from nexom.app.response import Response
+from .app import (
+    Request,
+    Response,
+    HtmlResponse,
+    JsonResponse,
+    Redirect,
+    ErrorResponse,
+    Path,
+    Get,
+    Post,
+    Static,
+    Router,
+    Cookie,
+    RequestCookies,
+    ObjectHTMLTemplates,
+    AuthService,
+    AuthClient,
+    KEY_NAME,
+    ParallelStorage,
+    MultiPartUploader,
+)
 
 __all__ = [
     "Request",
     "Response",
+    "HtmlResponse",
+    "JsonResponse",
+    "Redirect",
+    "ErrorResponse",
+    "Path",
+    "Get",
+    "Post",
+    "Static",
+    "Router",
+    "Cookie",
+    "RequestCookies",
+    "ObjectHTMLTemplates",
+    "AuthService",
+    "AuthClient",
+    "KEY_NAME",
+    "ParallelStorage",
+    "MultiPartUploader",
     "__version__",
 ]
 
-__version__ = "1.0.6"
+__version__ = "1.1.0"

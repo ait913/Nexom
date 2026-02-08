@@ -367,3 +367,8 @@ class PsPermissionError(NexomError):
     """This occurs when data is corrupted."""
     def __init__(self) -> None:
         super().__init__("PS09", f"Data is over size")
+        
+class PsFileTypesError(NexomError):
+    """This error occurs when the FileType is invalid."""
+    def __init__(self, status) -> None:
+        super().__init__("PS010", f"This FileType is invalid {str(status)}")
