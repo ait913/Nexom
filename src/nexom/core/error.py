@@ -347,9 +347,23 @@ class PsArgmentsError(NexomError):
 class PsPublicIDInvalidError(NexomError):
     """Occurs when public_id is invalid"""
     def __init__(self) -> None:
-        super().__init__("PS04", f"public_id is invalid")
+        super().__init__("PS05", f"public_id is invalid")
+class PsContentsIDInvalidError(NexomError):
+    """Occurs when contents_id is invalid"""
+    def __init__(self) -> None:
+        super().__init__("PS06", f"contents_id is invalid")
         
 class PsDataCorruotedError(NexomError):
     """This occurs when data is corrupted."""
     def __init__(self) -> None:
-        super().__init__("PS04", f"Data is corrupt")
+        super().__init__("PS07", f"Data is corrupt")
+        
+class PsChunkEntityTooLargeError(NexomError):
+    """This occurs when data is corrupted."""
+    def __init__(self) -> None:
+        super().__init__("PS08", f"Data is over size")
+        
+class PsPermissionError(NexomError):
+    """This occurs when data is corrupted."""
+    def __init__(self) -> None:
+        super().__init__("PS09", f"Data is over size")

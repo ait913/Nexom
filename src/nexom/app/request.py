@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs
@@ -11,12 +11,18 @@ from .cookie import RequestCookies
 
 WSGIEnviron = Mapping[str, Any]
 
+
 @dataclass(frozen=True)
 class File:
     filename: str
     content_type: str | None
     size: int | None
     file: Any
+
+
+# sentinel for caching "None" results
+_UNSET = object()
+
 
 class Request:
     """
@@ -30,8 +36,11 @@ class Request:
         and cannot be used together with .read_body()/.json()/.form() after reading the stream
     """
 
-    def __init__(self, environ: WSGIEnviron) -> None:
+    DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+
+    def __init__(self, environ: WSGIEnviron, *, max_body_size: int | None = None) -> None:
         self.environ: WSGIEnviron = environ
+        self.max_body_size = self.DEFAULT_MAX_BODY_SIZE if max_body_size is None else int(max_body_size)
 
         self.method: str = str(environ.get("REQUEST_METHOD", "GET")).upper()
         self.path: str = str(environ.get("PATH_INFO", "")).lstrip("/")
@@ -50,10 +59,10 @@ class Request:
         if isinstance(cl, str) and cl:
             self.headers["content-length"] = cl
 
-        self.cookie: RequestCookies | None = self._parse_cookies()
+        self.cookie: RequestCookies | dict[str, str] | None = self._parse_cookies()
 
         self._body: bytes | None = None
-        self._json_cache: Any | None = None
+        self._json_cache: Any = _UNSET
         self._form_cache: dict[str, list[str]] | None = None
         self._files_cache: dict[str, str | File] | None = None
         self._multipart_consumed: bool = False
@@ -62,7 +71,7 @@ class Request:
     # basic helpers
     # -------------------------
 
-    def _parse_cookies(self) -> RequestCookies | None:
+    def _parse_cookies(self) -> RequestCookies | dict[str, str] | None:
         cookie_header = self.environ.get("HTTP_COOKIE")
         if not cookie_header:
             return None
@@ -71,7 +80,11 @@ class Request:
         simple_cookie.load(cookie_header)
 
         cookies = {key: morsel.value for key, morsel in simple_cookie.items()}
-        return RequestCookies(**cookies)
+
+        try:
+            return RequestCookies(**cookies)
+        except Exception:
+            return cookies
 
     @property
     def content_type(self) -> str:
@@ -82,12 +95,15 @@ class Request:
         """
         return (self.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
 
-    def _content_length(self) -> int:
+    def _content_length(self) -> int | None:
         raw = self.environ.get("CONTENT_LENGTH")
         try:
-            return int(raw) if raw else 0
+            if raw is None or raw == "":
+                return None
+            n = int(raw)
+            return n if n >= 0 else None
         except (TypeError, ValueError):
-            return 0
+            return None
 
     # -------------------------
     # body
@@ -107,12 +123,26 @@ class Request:
             self._body = b""
             return self._body
 
+        stream = self.environ["wsgi.input"]
         length = self._content_length()
-        if length <= 0:
-            self._body = b""
+
+        if length is not None:
+            if length == 0:
+                self._body = b""
+                return self._body
+            if self.max_body_size is not None and length > self.max_body_size:
+                raise ValueError(f"Request body too large (Content-Length={length}, max={self.max_body_size})")
+            self._body = stream.read(length)
             return self._body
 
-        self._body = self.environ["wsgi.input"].read(length)
+        if self.max_body_size is not None:
+            data = stream.read(self.max_body_size + 1)
+            if len(data) > self.max_body_size:
+                raise ValueError(f"Request body too large (no valid Content-Length, max={self.max_body_size})")
+            self._body = data
+            return self._body
+
+        self._body = stream.read()
         return self._body
 
     @property
@@ -133,10 +163,11 @@ class Request:
         Raises:
             json.JSONDecodeError: If Content-Type is JSON but body is invalid.
         """
-        if self._json_cache is not None:
-            return self._json_cache
+        if self._json_cache is not _UNSET:
+            return self._json_cache  # may be None
 
         if self.content_type != "application/json":
+            self._json_cache = None
             return None
 
         raw = self.body
@@ -170,47 +201,7 @@ class Request:
 
     def files(self) -> dict[str, str | File] | None:
         """
-    Parse multipart/form-data using python-multipart.
-
-        Returns:
-            dict[str, str | File] or None.
-
-            - Returns None if Content-Type is not multipart/form-data.
-            - When multipart/form-data, returns a dict mapping each field name to:
-
-              1) Normal (non-file) field:
-                 - str
-
-              2) File field:
-                 - File dataclass
-
-                    File(
-                        filename: str,          # original filename from the multipart part
-                        content_type: str,      # Content-Type header of the part (can be None depending on parser/version)
-                        size: int,              # currently None (not calculated). keep for future use
-                        file: Any,              # file-like object or raw bytes depending on backend/parser
-                    )
-
-                 Notes about File.file:
-                 - If file-like, it usually supports .read() and returns bytes.
-                 - If raw bytes, it is already the full content of the uploaded file.
-                 - Treat File.file as opaque; convert to bytes by:
-                       src = f.file
-                       if hasattr(src, "read"): data = src.read()
-                       else: data = src
-
-        Raises:
-            ModuleNotFoundError:
-                If python-multipart is not installed.
-            ValueError:
-                - If Content-Type is multipart/form-data but boundary is missing.
-                - If the body was already read via .read_body()/.json()/.form() before calling this method.
-                - If multipart parsing fails.
-
-        IMPORTANT:
-            This method consumes the WSGI input stream (environ["wsgi.input"]).
-            Do not call .read_body() / .json() / .form() after calling .files().
-            Also, do not call .files() after the body has been read (except empty body).
+        Parse multipart/form-data using python-multipart.
         """
         if self._files_cache is not None:
             return self._files_cache
@@ -218,8 +209,6 @@ class Request:
         if self.content_type != "multipart/form-data":
             return None
 
-        # Lazy import (optional dependency)
-        # python-multipart package provides "multipart" module.
         try:
             from multipart import MultipartParser  # type: ignore
         except Exception as e:
@@ -229,7 +218,7 @@ class Request:
             ) from e
 
         # Prevent mixing with body-based parsing
-        if self._body is not None and self._body != b"":
+        if self._body is not None:
             raise ValueError("Body was already read. multipart parsing must be done first.")
 
         self._multipart_consumed = True
@@ -245,52 +234,40 @@ class Request:
         if not boundary:
             raise ValueError("multipart/form-data boundary not found")
 
-        # Parse stream
         stream = self.environ["wsgi.input"]
-
         parser = MultipartParser(stream, boundary.encode("utf-8"))
 
         out: dict[str, str | File] = {}
 
-        # MultipartParser yields parts; API differs slightly by version.
-        # We handle common attributes: name, filename, headers, raw, file.
         for p in parser:  # type: ignore
             name = getattr(p, "name", None)
             if not name:
                 continue
+            if isinstance(name, (bytes, bytearray)):
+                name = name.decode("utf-8", errors="replace")
 
             filename = getattr(p, "filename", None)
             if filename:
-                # file part
+                if isinstance(filename, (bytes, bytearray)):
+                    filename = filename.decode("utf-8", errors="replace")
+
                 content_type = None
                 headers = getattr(p, "headers", None)
                 if isinstance(headers, dict):
-                    # some versions use bytes keys/values
                     ct = headers.get(b"Content-Type") or headers.get("Content-Type")
                     if ct:
                         content_type = ct.decode() if isinstance(ct, (bytes, bytearray)) else str(ct)
 
-                # Try to expose a stream if available, else raw bytes
                 fileobj = getattr(p, "file", None)
                 raw = getattr(p, "raw", None)
 
-                # File オブジェクトに変更
-                #out[name] = {
-                #    "filename": filename,
-                #    "content_type": content_type,
-                #    "size": None,
-                #    "file": fileobj if fileobj is not None else raw,
-                #}
-                
                 out[name] = File(
-                    filename=filename,
+                    filename=str(filename),
                     content_type=content_type,
                     size=None,
                     file=fileobj if fileobj is not None else raw,
                 )
-                
             else:
-                # normal field
                 value = getattr(p, "value", None)
                 if value is None:
                     raw = getattr(p, "raw", b"")
@@ -298,7 +275,9 @@ class Request:
                         value = raw.decode("utf-8", errors="replace")
                     else:
                         value = str(raw)
-                out[name] = value
+                if isinstance(value, (bytes, bytearray)):
+                    value = value.decode("utf-8", errors="replace")
+                out[name] = str(value)
 
         self._files_cache = out
         return self._files_cache
