@@ -5,6 +5,18 @@ Lightweight Python Web Framework (WSGI)
 Nexomは短いコードで最低限動作し、シンプルで理解のしやすい設計・構造を目指しています。
 また細かい仕様も変更でき、多様な処理に対応します。
 
+## 主な機能セット
+ - WSGIベースの軽量Webフレームワーク
+ - ルーティング（GET/POST、動的パス引数）
+ - 静的ファイル配信
+ - Request/ResponseのシンプルAPI（HTML/JSON/Redirect/エラーページ）
+ - テンプレート（ObjectHTML: extends/import/slot）
+ - ビルドイン標準認証サーバー＆クライアント（AuthService/AuthClient）
+ - Cookie管理
+ - ミドルウェア対応
+ - プロジェクト生成（buildTools）
+ - マルチパートアップロードと並列ストレージ基盤（ParallelStorage/MultiPartUploader）
+
 ## はじめる
 最初のサーバーを起動するには、3つの手順が必要です。
 
