@@ -33,6 +33,22 @@ def _sha256_hex_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
+    """
+    Build a PSC filename for X-Accel-Redirect.
+
+    Format:
+        <contents_id>__PSC_arg1-000_arg2-111<suffix>
+    kwargs are sorted alphabetically by key.
+    """
+    if kwargs:
+        items = [f"{k}-{kwargs[k]}" for k in sorted(kwargs.keys())]
+        tail = "__PSC_" + "_".join(items)
+    else:
+        tail = "__PSC_"
+    return f"{contents_id}{tail}{suffix}"
+
+
 @dataclass(frozen=True)
 class FileMeta:
     contents_id: str
@@ -41,6 +57,7 @@ class FileMeta:
     size: int
     pid: str
     filename: str
+    suffix: str
     status: str
     permission_id: str | None
     creation_date: str
@@ -60,6 +77,7 @@ class ParallelStorageDBM(DatabaseManager):
                     size INT NOT NULL,
                     pid TEXT NOT NULL,
                     filename TEXT NOT NULL,
+                    suffix TEXT NOT NULL,
                     status TEXT DEFAULT 'INIT',
                     permission_id TEXT DEFAULT NULL,
                     creation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -76,11 +94,12 @@ class ParallelStorageDBM(DatabaseManager):
                 size: int,
                 pid: str,
                 filename: str,
+                suffix: str,
                 permission_id: str | None,
                 ):
         self.execute(
-            "INSERT INTO parallel_storage (contents_id, public_id, size, pid, filename, permission_id) VALUES(?, ?, ?, ?, ?, ?)",
-            contents_id, public_id, size, pid, filename, permission_id
+            "INSERT INTO parallel_storage (contents_id, public_id, size, pid, filename, suffix, permission_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            contents_id, public_id, size, pid, filename, suffix, permission_id
         )
     def _get_by_public_id(self, public_id: str) -> tuple:
         l = self.execute("SELECT * FROM parallel_storage WHERE public_id = ?", public_id)
@@ -95,7 +114,7 @@ class ParallelStorageDBM(DatabaseManager):
         return l[0]
         
     # First
-    def register(self, filename: str, size: int, pid: str, permission_id: str | None = None) -> str:
+    def register(self, filename: str, suffix: str, size: int, pid: str, permission_id: str | None = None) -> str:
         "Added in database and returns public_id"
         contents_id = _rand()
         public_id = _rand()
@@ -103,6 +122,7 @@ class ParallelStorageDBM(DatabaseManager):
             contents_id=contents_id,
             public_id=public_id,
             filename=filename,
+            suffix=suffix,
             size=size,
             pid=pid,
             permission_id=permission_id
@@ -161,9 +181,9 @@ class ParallelStorageDBM(DatabaseManager):
             record = self._get_by_contents_id(contents_id)
         if public_id:
             record = self._get_by_public_id(public_id)
-        contents_id_, public_id, typess, sizes, pids, filenames, status, permission_id, creation_date, last_access = record
+        contents_id_, public_id, typess, sizes, pids, filename, suffix, status, permission_id, creation_date, last_access = record
         
-        return FileMeta(contents_id_, public_id, typess, sizes, pids, filenames, status, permission_id, creation_date, last_access)
+        return FileMeta(contents_id_, public_id, typess, sizes, pids, filename, suffix, status, permission_id, creation_date, last_access)
 
     # Commit
     def commit(self) -> None:
@@ -229,8 +249,10 @@ class MultiPartUploader:
         "returns public_id"
         if size <= 0 or total_chunks <= 0:
             raise PsArgmentsError()
+        
+        suffix = Path(filename).suffix
 
-        public_id = self._PSDBM.register(filename, size, pid, permission_id)
+        public_id = self._PSDBM.register(filename, suffix, size, pid, permission_id)
         
         working_dir = self.working_root / public_id
         upload_meta = working_dir / "meta.json"
@@ -287,8 +309,8 @@ class MultiPartUploader:
 
         working_dir = self.working_root / public_id
         upload_meta = working_dir / "meta.json"
-        comp_file = working_dir / f"complete{file_suffix}"
-        dest_file = self.contents_root / f"{fMeta.contents_id}{file_suffix}"
+        comp_file = working_dir / f"complete.parts"
+        dest_file = self.contents_root / format_psc_filename(fMeta.contents_id, fMeta.suffix)
 
         uMeta = UploadMeta.readJson(upload_meta)
 
