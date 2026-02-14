@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "Nexom"
-version = "1.1.31"
+version = "1.1.32"
 description = "Lightweight Python Web Framework (WSGI)"
 readme = "README.md"
 requires-python = ">=3.10"
