@@ -55,7 +55,7 @@ class ParallelStorage:
         
         self._PSDBM = ParallelStorageDBM(db_file)
         
-    def format_psc_contents_id(self, public_id: str, **kwargs) -> Path:
+    def format_psc_public_id(self, public_id: str, **kwargs) -> Path:
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
         return contents_actual_path.resolve()
@@ -95,9 +95,15 @@ class ParallelStorage:
     
     def update_suffix(self, public_id: str, suffix: str) -> None:
         if not suffix.startswith("."):
-            raise PsArgmentsError()
+            raise PsArgmentsError("suffix")
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         self._PSDBM.update_suffix(fMeta.contents_id, suffix)
+        
+    def update_status(self, public_id: str, status: FileStatus) -> None:
+        if not status in FileStatus:
+            raise PsArgmentsError("status")
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        self._PSDBM.status_change(fMeta.contents_id, status)
 
 
 @dataclass(frozen=True)
@@ -312,9 +318,10 @@ class MultiPartUploader:
         if size <= 0 or total_chunks <= 0:
             raise PsArgmentsError()
         
+        stem = Path(filename).stem
         suffix = Path(filename).suffix
 
-        public_id = self._PSDBM.register(filename, suffix, size, pid, permission_id)
+        public_id = self._PSDBM.register(stem, suffix, size, pid, permission_id)
         
         working_dir = self.working_root / public_id
         upload_meta = working_dir / "meta.json"

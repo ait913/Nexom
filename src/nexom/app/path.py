@@ -101,7 +101,7 @@ class Get(Path):
 
 class Post(Path):
     def __init__(self, path: str, handler: Handler, name: str):
-        super().__init__(path, handler, name, methods={"POST"})
+        super().__init__(path, handler, name, methods={"POST", "OPTIONS"})
 
 
 # ====================

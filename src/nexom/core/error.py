@@ -341,8 +341,8 @@ class PsFileStatusInvalidError(NexomError):
         
 class PsArgmentsError(NexomError):
     """Raised when an argument value is invalid"""
-    def __init__(self) -> None:
-        super().__init__("PS04", f"Argments value is invalid")
+    def __init__(self, name: str | None = None) -> None:
+        super().__init__("PS04", f"Argments value is invalid.{" " + name if name else ""}")
         
 class PsPublicIDInvalidError(NexomError):
     """Occurs when public_id is invalid"""
