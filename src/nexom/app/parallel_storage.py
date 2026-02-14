@@ -51,6 +51,28 @@ def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
     return f"{contents_id}{tail}{suffix}"
 
 
+@dataclass(frozen=True)
+class FileMeta:
+    """Immutable metadata for a stored file."""
+    contents_id: str
+    public_id: str
+    types: str
+    size: int
+    pid: str
+    filename: str
+    suffix: str
+    status: str
+    permission_id: str | None
+    creation_date: str
+    last_access: str
+    
+    def isTypes(self, types: FileTypes) -> bool:
+        """Return True if the stored type matches the given FileTypes value."""
+        if types not in ("Documents", "Images", "Binary", "Media", "Dangerous"):
+            raise PsFileTypesError()
+        return types == self.types
+
+
 class ParallelStorage:
     """
     Convenience wrapper around ParallelStorageDBM for public APIs.
@@ -122,28 +144,11 @@ class ParallelStorage:
         _FileStatusTypesCheck(status)
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         self._PSDBM.status_change(fMeta.contents_id, status)
+        
+    def getMeta(self, public_id: str) -> FileMeta:
+        """Get FileMeta"""
+        return self._PSDBM.getMeta(public_id=public_id)
 
-
-@dataclass(frozen=True)
-class FileMeta:
-    """Immutable metadata for a stored file."""
-    contents_id: str
-    public_id: str
-    types: str
-    size: int
-    pid: str
-    filename: str
-    suffix: str
-    status: str
-    permission_id: str | None
-    creation_date: str
-    last_access: str
-    
-    def isTypes(self, types: FileTypes) -> bool:
-        """Return True if the stored type matches the given FileTypes value."""
-        if types not in ("Documents", "Images", "Binary", "Media", "Dangerous"):
-            raise PsFileTypesError()
-        return types == self.types
 
 class ParallelStorageDBM(DatabaseManager):
     """Database manager for the parallel_storage table."""
