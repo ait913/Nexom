@@ -91,7 +91,16 @@ class ParallelStorage:
         kwargs are embedded in the PSC filename format.
         """
         fMeta = self._PSDBM.getMeta(public_id=public_id)
-        contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
+        
+        #各キャッシュファイルの拡張子へ変換
+        suffix = fMeta.suffix
+        
+        #画像圧縮していた場合
+        if fMeta.types == "Images":
+            if "width" in kwargs or "height" in kwargs or "quality" in kwargs:
+                suffix = ".webp"
+        
+        contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, suffix, **kwargs)
         return contents_actual_path.resolve()
     
     def comp_img(self, public_id: str, width: int | None, height: int | None, quality: int | None) -> Path:
@@ -114,9 +123,8 @@ class ParallelStorage:
         q = 70 if quality is None else quality
 
         original_path = self.format_psc_public_id(public_id)
-        cache_path = (self.contents_dir / format_psc_filename(
-            fMeta.contents_id, ".webp", width=width, height=height, quality=q
-        )).resolve()
+        # cache name uses user-provided quality only (omit if None)
+        cache_path = self.format_psc_public_id(public_id, width=width, height=height, quality=quality)
         
         # originalの画像を指定の値で圧縮し、cache_pathへ保存、返り値はcache_path
         try:
