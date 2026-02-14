@@ -1,8 +1,4 @@
-"""
-NEXOM - A lightweight Python web framework.
-
-Top-level public API exports the most commonly used application-layer types.
-"""
+"""Nexom public API exports."""
 
 from __future__ import annotations
 

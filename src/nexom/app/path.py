@@ -1,3 +1,5 @@
+"""Routing and static file serving."""
+
 from __future__ import annotations
 
 import os

@@ -1,6 +1,4 @@
-"""
-Template helpers provided by Nexom.
-"""
+"""Template helpers provided by Nexom."""
 
 from .auth import AuthPages
 

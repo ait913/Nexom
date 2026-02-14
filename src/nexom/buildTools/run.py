@@ -1,3 +1,5 @@
+"""Run Nexom projects with gunicorn."""
+
 from __future__ import annotations
 
 import os

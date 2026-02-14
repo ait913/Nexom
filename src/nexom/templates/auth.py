@@ -1,3 +1,5 @@
+"""Auth HTML pages and handlers."""
+
 # src/nexom/templates/auth.py
 from __future__ import annotations
 

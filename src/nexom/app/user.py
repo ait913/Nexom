@@ -1,3 +1,5 @@
+"""User model and user database storage."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

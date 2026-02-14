@@ -1,3 +1,5 @@
+"""Router template for generated app."""
+
 from __future__ import annotations
 
 from nexom.app.path import Get, Static, Router

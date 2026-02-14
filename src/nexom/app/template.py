@@ -1,3 +1,5 @@
+"""Filesystem template loader."""
+
 from __future__ import annotations
 
 import re

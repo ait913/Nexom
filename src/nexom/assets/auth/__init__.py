@@ -1,5 +1,2 @@
-"""
-Auth page assets bundled with Nexom.
+"""Auth asset templates."""
 
-Used by built-in auth templates and project scaffolding.
-"""

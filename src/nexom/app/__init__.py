@@ -1,9 +1,4 @@
-"""
-Nexom application layer public API.
-
-This module exposes the stable interfaces intended for application developers.
-Internal implementation details should NOT be imported directly.
-"""
+"""Application-layer public API for Nexom."""
 
 # ---- Request / Response ----
 from .request import Request

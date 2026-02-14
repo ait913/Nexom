@@ -1,8 +1,4 @@
-"""
-Nexom core layer.
-
-Internal utilities and shared primitives used across the framework.
-"""
+"""Core utilities and shared primitives."""
 
 from . import error
 from . import log

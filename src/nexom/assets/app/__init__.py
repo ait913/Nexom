@@ -1,6 +1,2 @@
-"""
-Default app assets bundled with Nexom.
+"""Default app asset templates."""
 
-Used by build tools to scaffold a new project.
-Not intended for direct import in application code.
-"""

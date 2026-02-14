@@ -1,15 +1,4 @@
-"""
-Nexom Object HTML (OHTML)
-
-A lightweight HTML composition system that extends plain HTML with:
-- <Extends ... />
-- <Insert ...>...</Insert>
-- <Import ... />
-- {{slot}}
-
-This renderer also preserves indentation when importing blocks or inserting
-multi-line slot values.
-"""
+"""Object HTML template renderer."""
 
 from __future__ import annotations
 

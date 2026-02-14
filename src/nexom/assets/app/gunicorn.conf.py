@@ -1,3 +1,5 @@
+"""Gunicorn config template for generated app."""
+
 from __app_name__.config import ADDRESS, PORT, WORKERS, RELOAD  # noqa: E402
 
 bind = f"{ADDRESS}:{PORT}"

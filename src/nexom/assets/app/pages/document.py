@@ -1,3 +1,5 @@
+"""Document page handler template."""
+
 from nexom.app.request import Request
 from nexom.app.response import Response
 

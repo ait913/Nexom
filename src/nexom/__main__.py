@@ -1,3 +1,5 @@
+"""Nexom command-line interface entrypoint."""
+
 from __future__ import annotations
 
 import argparse

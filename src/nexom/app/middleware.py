@@ -1,3 +1,5 @@
+"""Middleware interfaces and built-ins."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

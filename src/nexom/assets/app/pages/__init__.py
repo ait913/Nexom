@@ -1,5 +1,2 @@
-"""
-Default page handlers used in generated Nexom projects.
+"""Default page handler templates."""
 
-These are templates copied into new apps by build tools.
-"""

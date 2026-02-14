@@ -1,3 +1,5 @@
+"""Template loader for generated app pages."""
+
 from __future__ import annotations
 
 from nexom.app.template import ObjectHTMLTemplates

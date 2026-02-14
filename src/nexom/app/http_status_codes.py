@@ -1,3 +1,5 @@
+"""HTTP status code name map."""
+
 http_status_codes = {
     # 1xx Informational
     100: "Continue",

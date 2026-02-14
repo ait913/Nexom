@@ -1,3 +1,5 @@
+"""Parallel storage and multipart upload."""
+
 from typing import Literal
 from pathlib import Path
 from dataclasses import dataclass

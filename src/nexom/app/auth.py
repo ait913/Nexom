@@ -1,3 +1,5 @@
+"""Authentication service, client, and storage."""
+
 # src/nexom/app/auth.py
 from __future__ import annotations
 
