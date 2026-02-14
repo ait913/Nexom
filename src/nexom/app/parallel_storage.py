@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import shutil
 import hashlib
 import secrets
+import mimetypes
 
 from json.decoder import JSONDecodeError
 import json
@@ -33,6 +34,46 @@ def _sha256_hex_file(path: Path) -> str:
                 break
             h.update(b)
     return h.hexdigest()
+
+def _detect_file_type(path: Path, filename: str) -> FileTypes:
+    """
+    Detect a FileTypes value from content and filename.
+
+    Priority:
+    - image content -> Images
+    - media mime (audio/video) -> Media
+    - document mime (text/application) -> Documents
+    - dangerous extensions -> Dangerous
+    - fallback -> Binary
+    """
+    # content-based image detection (Pillow)
+    try:
+        from PIL import Image  # type: ignore
+        with Image.open(str(path)) as im:
+            im.verify()
+        return "Images"
+    except Exception:
+        pass
+
+    # extension/mime-based detection
+    mime, _ = mimetypes.guess_type(filename)
+    if mime:
+        if mime.startswith("image/"):
+            return "Images"
+        if mime.startswith("audio/") or mime.startswith("video/"):
+            return "Media"
+        if mime.startswith("text/") or mime == "application/pdf":
+            return "Documents"
+
+    # dangerous extensions (very rough)
+    dangerous_exts = {
+        ".exe", ".dll", ".bat", ".cmd", ".ps1", ".sh", ".msi",
+        ".app", ".dylib", ".so", ".jar",
+    }
+    if Path(filename).suffix.lower() in dangerous_exts:
+        return "Dangerous"
+
+    return "Binary"
 
 
 def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
@@ -469,6 +510,10 @@ class MultiPartUploader:
         # サイズも最低限チェック
         if comp_file.stat().st_size != fMeta.size:
             raise PsDataCorruotedError()
+
+        # update file type based on content
+        detected = _detect_file_type(comp_file, fMeta.filename + fMeta.suffix)
+        self._PSDBM.update_types(fMeta.contents_id, detected)
 
         # move completed file into contents storage
         self.contents_root.mkdir(parents=True, exist_ok=True)
