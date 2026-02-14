@@ -94,7 +94,7 @@ class ParallelStorage:
         contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
         return contents_actual_path.resolve()
     
-    def comp_img(self, public_id: str, width: int, height: int, quality: int) -> Path:
+    def comp_img(self, public_id: str, width: int | None, height: int | None, quality: int | None) -> Path:
         """
         Generate a WebP image variant and return its path.
 
@@ -103,15 +103,19 @@ class ParallelStorage:
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         if not fMeta.isTypes("Images"):
             raise PsFileTypesError()
-        
-        if width <= 0 or height <= 0:
-            raise PsArgmentsError()
-        if quality < 1 or quality > 100:
-            raise PsArgmentsError()
-        
+
+        if width is not None and width <= 0:
+            raise PsArgmentsError("width")
+        if height is not None and height <= 0:
+            raise PsArgmentsError("height")
+        if quality is not None and (quality < 1 or quality > 100):
+            raise PsArgmentsError("quality")
+
+        q = 70 if quality is None else quality
+
         original_path = self.format_psc_public_id(public_id)
         cache_path = (self.contents_dir / format_psc_filename(
-            fMeta.contents_id, ".webp", width=width, height=height, quality=quality
+            fMeta.contents_id, ".webp", width=width, height=height, quality=q
         )).resolve()
         
         # originalの画像を指定の値で圧縮し、cache_pathへ保存、返り値はcache_path
@@ -126,9 +130,21 @@ class ParallelStorage:
         
         with Image.open(str(original_path)) as im:
             im = im.convert("RGB")
-            if im.size != (width, height):
-                im = im.resize((width, height), Image.LANCZOS)
-            im.save(str(cache_path), format="WEBP", quality=quality, method=6)
+
+            if width is None and height is None:
+                target_w, target_h = im.size
+            elif width is None:
+                target_h = height
+                target_w = round(im.size[0] * (target_h / im.size[1]))
+            elif height is None:
+                target_w = width
+                target_h = round(im.size[1] * (target_w / im.size[0]))
+            else:
+                target_w, target_h = width, height
+
+            if im.size != (target_w, target_h):
+                im = im.resize((target_w, target_h), Image.LANCZOS)
+            im.save(str(cache_path), format="WEBP", quality=q, method=6)
         
         return cache_path
     
