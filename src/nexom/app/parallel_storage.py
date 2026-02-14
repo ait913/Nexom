@@ -100,8 +100,7 @@ class ParallelStorage:
         self._PSDBM.update_suffix(fMeta.contents_id, suffix)
         
     def update_status(self, public_id: str, status: FileStatus) -> None:
-        if not status in FileStatus:
-            raise PsArgmentsError("status")
+        _FileStatusTypesCheck(status)
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         self._PSDBM.status_change(fMeta.contents_id, status)
 
