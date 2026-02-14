@@ -70,7 +70,7 @@ class ParallelStorage:
         if quality < 1 or quality > 100:
             raise PsArgmentsError()
         
-        original_path = self.format_psc_contents_id(public_id)
+        original_path = self.format_psc_public_id(public_id)
         cache_path = (self.contents_dir / format_psc_filename(
             fMeta.contents_id, ".webp", width=width, height=height, quality=quality
         )).resolve()
