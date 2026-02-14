@@ -25,7 +25,7 @@ class Response:
         status: int = 200,
         headers: Iterable[Header] | None = None,
         cookie: str | None = None,
-        content_type: str = "text/html",
+        content_type: str = "text/plain",
         charset: str = "utf-8",
         include_charset: bool = False
     ) -> None:
