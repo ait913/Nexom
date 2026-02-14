@@ -16,6 +16,7 @@ WSGIEnviron = Mapping[str, Any]
 
 @dataclass(frozen=True)
 class File:
+    """Uploaded file container from multipart/form-data."""
     filename: str
     content_type: str | None
     size: int | None
@@ -74,6 +75,7 @@ class Request:
     # -------------------------
 
     def _parse_cookies(self) -> RequestCookies | dict[str, str] | None:
+        """Parse Cookie header into RequestCookies if possible."""
         cookie_header = self.environ.get("HTTP_COOKIE")
         if not cookie_header:
             return None

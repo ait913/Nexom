@@ -104,6 +104,9 @@ class Session:
 class AuthService:
     """
     Auth API service (JSON only).
+
+    Exposes signup/login/logout/verify via a Router.
+    Intended to run as a standalone auth server.
     """
 
     def __init__(
@@ -132,6 +135,11 @@ class AuthService:
         self.logger = AuthLogger(log_path)
 
     def handler(self, environ: dict) -> JsonResponse:
+        """
+        WSGI entrypoint for the auth API.
+
+        Returns JsonResponse with proper status codes for NexomError.
+        """
         req = Request(environ)
         try:
             return self.routing.handle(req)
@@ -147,6 +155,11 @@ class AuthService:
     # ---- handlers ----
 
     def signup(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Create a new user.
+
+        Expected JSON: {user_id, public_name, password}
+        """
         if request.method != "POST":
             return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
 
@@ -159,6 +172,11 @@ class AuthService:
         return JsonResponse({"ok": True}, status=201)
 
     def login(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Authenticate and return a session token.
+
+        Expected JSON: {user_id, password}
+        """
         if request.method != "POST":
             return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
 
@@ -186,6 +204,11 @@ class AuthService:
         )
 
     def logout(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Revoke a session token.
+
+        Expected JSON: {token}
+        """
         if request.method != "POST":
             return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
 
@@ -195,6 +218,12 @@ class AuthService:
         return JsonResponse({"ok": True})
 
     def verify(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Verify a session token.
+
+        Expected JSON: {token}
+        Returns {active: bool, ...} when active.
+        """
         if request.method != "POST":
             return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
 
@@ -221,7 +250,11 @@ class AuthService:
 # --------------------
 
 class AuthClient:
-    """AuthService を HTTP で叩くクライアント"""
+    """
+    HTTP client for AuthService.
+
+    Provides signup/login/logout/verify helpers.
+    """
 
     def __init__(self, auth_url: str, *, timeout: float = 3.0) -> None:
         base = auth_url.rstrip("/")
@@ -232,6 +265,7 @@ class AuthClient:
         self.timeout = timeout
 
     def _post(self, url: str, body: dict) -> dict:
+        """POST JSON and return parsed JSON dict."""
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         req = UrlRequest(
             url,
@@ -264,6 +298,7 @@ class AuthClient:
             raise AuthServiceUnavailableError()
 
     def signup(self, *, user_id: str, public_name: str, password: str) -> None:
+        """Create a user account on the auth server."""
         d = self._post(
             self.signup_url,
             {"user_id": user_id, "public_name": public_name, "password": password},
@@ -273,6 +308,7 @@ class AuthClient:
         self._raise_from_error_code(str(d.get("error") or ""))
 
     def login(self, *, user_id: str, password: str) -> Session:
+        """Login and return a Session."""
         d = self._post(self.login_url, {"user_id": user_id, "password": password})
         if not d.get("ok"):
             self._raise_from_error_code(str(d.get("error") or ""))
@@ -280,6 +316,7 @@ class AuthClient:
         return Session(str(d["pid"]), str(d["user_id"]), str(d["public_name"]), str(d["token"]), int(d["expires_at"]), str(d["user_agent"]))
 
     def verify_token(self, token: str) -> Session | None:
+        """Verify a token and return Session or None."""
         d = self._post(self.verify_url, {"token": token})
 
         if d.get("active") is True:
@@ -288,6 +325,7 @@ class AuthClient:
         return None
 
     def logout(self, *, token: str) -> None:
+        """Logout (revoke) a session token."""
         d = self._post(self.logout_url, {"token": token})
         if d.get("ok"):
             return
@@ -322,7 +360,13 @@ class AuthClient:
 # --------------------
 
 class AuthDBM(DatabaseManager):
+    """
+    Auth database manager.
+
+    Manages users and sessions in a SQLite DB.
+    """
     def _init(self) -> None:
+        """Create auth tables if they do not exist."""
         self.execute_many(
             [
                 (
@@ -356,6 +400,7 @@ class AuthDBM(DatabaseManager):
         )
 
     def signup(self, user_id: str, public_name: str, password: str) -> None:
+        """Create a new user record."""
         if not user_id:
             raise AuthMissingFieldError("user_id")
         if not public_name:
@@ -383,6 +428,7 @@ class AuthDBM(DatabaseManager):
             raise AuthServiceUnavailableError()
 
     def login(self, user_id: str, password: str, *, user_agent: str | None, ttl_sec: int) -> LocalSession:
+        """Validate credentials and create a new session."""
         if not user_id:
             raise AuthMissingFieldError("user_id")
         if not password:
@@ -419,6 +465,7 @@ class AuthDBM(DatabaseManager):
         return LocalSession(sid, uid, user_id, public_name, token, exp, None, user_agent)
 
     def logout(self, token: str) -> None:
+        """Revoke a session token."""
         if not token:
             raise AuthMissingFieldError("token")
 
@@ -429,6 +476,7 @@ class AuthDBM(DatabaseManager):
         )
 
     def verify(self, token: str | None) -> LocalSession | None:
+        """Return LocalSession if token is valid and active, else None."""
         if not token:
             return None
 

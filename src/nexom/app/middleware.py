@@ -54,6 +54,11 @@ class MiddlewareChain:
     
 
 class CORSMiddleware:
+    """
+    Simple CORS middleware.
+
+    Supports preflight OPTIONS and basic allow headers.
+    """
     def __init__(
         self,
         allowed_origins: list[str] | None = None,   # None or ["*"] = allow all
@@ -83,6 +88,7 @@ class CORSMiddleware:
         res.append_header("Vary", "Origin")
 
     def __call__(self, request: Request, args: dict[str, str | None], next_: Handler) -> Response:
+        """Apply CORS headers and handle preflight requests."""
         origin = request.headers.get("origin")
         if not origin:
             return next_(request, args)

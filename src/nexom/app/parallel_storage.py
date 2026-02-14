@@ -52,17 +52,32 @@ def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
 
 
 class ParallelStorage:
+    """
+    Convenience wrapper around ParallelStorageDBM for public APIs.
+
+    Provides PSC path formatting, status updates, and image compression helpers.
+    """
     def __init__(self, db_file:str, contents_dir: str) -> None:
         self.contents_dir = Path(contents_dir)
         
         self._PSDBM = ParallelStorageDBM(db_file)
         
     def format_psc_public_id(self, public_id: str, **kwargs) -> Path:
+        """
+        Return the resolved PSC file path for a public_id.
+
+        kwargs are embedded in the PSC filename format.
+        """
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
         return contents_actual_path.resolve()
     
     def comp_img(self, public_id: str, width: int, height: int, quality: int) -> Path:
+        """
+        Generate a WebP image variant and return its path.
+
+        The source must be an image, and output is saved under contents_dir.
+        """
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         if not fMeta.isTypes("Images"):
             raise PsFileTypesError()
@@ -96,12 +111,14 @@ class ParallelStorage:
         return cache_path
     
     def update_suffix(self, public_id: str, suffix: str) -> None:
+        """Update stored file suffix for a public_id."""
         if not suffix.startswith("."):
             raise PsArgmentsError("suffix")
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         self._PSDBM.update_suffix(fMeta.contents_id, suffix)
         
     def update_status(self, public_id: str, status: FileStatus) -> None:
+        """Update stored status for a public_id."""
         _FileStatusTypesCheck(status)
         fMeta = self._PSDBM.getMeta(public_id=public_id)
         self._PSDBM.status_change(fMeta.contents_id, status)
@@ -109,6 +126,7 @@ class ParallelStorage:
 
 @dataclass(frozen=True)
 class FileMeta:
+    """Immutable metadata for a stored file."""
     contents_id: str
     public_id: str
     types: str
@@ -122,15 +140,18 @@ class FileMeta:
     last_access: str
     
     def isTypes(self, types: FileTypes) -> bool:
+        """Return True if the stored type matches the given FileTypes value."""
         if types not in ("Documents", "Images", "Binary", "Media", "Dangerous"):
             raise PsFileTypesError()
         return types == self.types
 
 class ParallelStorageDBM(DatabaseManager):
+    """Database manager for the parallel_storage table."""
     def __init__(self, db_file: str):
         super().__init__(db_file, auto_commit=False)
         
     def _init(self):
+        """Create storage table if it does not exist."""
         self.execute(
             """
                 CREATE TABLE IF NOT EXISTS parallel_storage (
@@ -160,17 +181,20 @@ class ParallelStorageDBM(DatabaseManager):
                 suffix: str,
                 permission_id: str | None,
                 ):
+        """Insert a new storage record."""
         self.execute(
             "INSERT INTO parallel_storage (contents_id, public_id, size, pid, filename, suffix, permission_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
             contents_id, public_id, size, pid, filename, suffix, permission_id
         )
     def _get_by_public_id(self, public_id: str) -> tuple:
+        """Fetch record by public_id or raise."""
         l = self.execute("SELECT * FROM parallel_storage WHERE public_id = ?", public_id)
         if not l:
             raise PsPublicIDInvalidError()
         return l[0]
 
     def _get_by_contents_id(self, contents_id: str) -> tuple:
+        """Fetch record by contents_id or raise."""
         l = self.execute("SELECT * FROM parallel_storage WHERE contents_id = ?", contents_id)
         if not l:
             raise PsContentsIDInvalidError()  # 例外名は本当は contents_id 用が欲しい
@@ -178,7 +202,7 @@ class ParallelStorageDBM(DatabaseManager):
         
     # First
     def register(self, filename: str, suffix: str, size: int, pid: str, permission_id: str | None = None) -> str:
-        "Added in database and returns public_id"
+        """Insert a new record and return public_id."""
         contents_id = _rand()
         public_id = _rand()
         self._insert(
@@ -197,6 +221,7 @@ class ParallelStorageDBM(DatabaseManager):
         
     # Changes
     def status_change(self, contents_id: str, status: FileStatus) -> None:
+        """Update status for contents_id."""
         _FileStatusTypesCheck(status)
         self.execute(
             "UPDATE parallel_storage SET status = ? WHERE contents_id = ?",
@@ -205,6 +230,7 @@ class ParallelStorageDBM(DatabaseManager):
         self.commit()
         
     def update_public_id(self, contents_id: str) -> None:
+        """Regenerate public_id for contents_id."""
         new_public_id = _rand()
         self.execute(
             "UPDATE parallel_storage SET public_id = ? WHERE contents_id = ?",
@@ -212,20 +238,22 @@ class ParallelStorageDBM(DatabaseManager):
         )
         self.commit()
     def update_types(self, contents_id: str, types: FileTypes) -> None:
+        """Update file type for contents_id."""
         self.execute(
             "UPDATE parallel_storage SET types = ? WHERE contents_id = ?",
             types, contents_id
         )
         self.commit()
     def update_suffix(self, contents_id: str, suffix: str) -> None:
+        """Update suffix for contents_id."""
         self.execute(
             "UPDATE parallel_storage SET suffix = ? WHERE contents_id = ?",
             suffix, contents_id
         )
         self.commit()
-        
     # Delete
     def remove(self, pid: str | None, *, contents_id:str | None = None, public_id:str | None = None) -> None:
+        """Delete a record by contents_id or public_id."""
         meta = self.getMeta(contents_id=contents_id, public_id=public_id)
     
         """
@@ -243,6 +271,7 @@ class ParallelStorageDBM(DatabaseManager):
         
     # Meta Getter
     def getMeta(self, *, contents_id:str | None = None, public_id:str | None = None) -> FileMeta:
+        """Return FileMeta for contents_id or public_id."""
         if (not contents_id) and (not public_id): raise PsArgmentsError()
         if contents_id and public_id: raise PsArgmentsError()
         
@@ -261,11 +290,13 @@ class ParallelStorageDBM(DatabaseManager):
     
 @dataclass(frozen=True)
 class UploadMeta:
+    """Metadata for a multipart upload session."""
     public_id: str
     total_chunks: int
     sha256: str
     
     def toJson(self) -> str:
+        """Serialize to JSON string."""
         return json.dumps({
             "public_id": self.public_id,
             "total_chunks": self.total_chunks,
@@ -274,6 +305,7 @@ class UploadMeta:
         
     @staticmethod
     def readJson(path: Path) -> "UploadMeta":
+        """Read UploadMeta from a JSON file."""
         try:
             with path.open(mode="r", encoding="utf-8") as m:
                 meta_dict = json.load(m)
@@ -293,6 +325,11 @@ class UploadMeta:
         )
 
 class MultiPartUploader:
+    """
+    Multipart upload workflow with chunk verification and commit.
+
+    Uses ParallelStorageDBM for metadata and stores chunks under working_root.
+    """
     def __init__(self, db_file: str, working_dir: str, contents_dir: str):
         self.db_file: str = db_file
         self.working_root: Path = Path(working_dir)
@@ -301,12 +338,14 @@ class MultiPartUploader:
         self._PSDBM = ParallelStorageDBM(db_file)
         
     def _getUploadMeta(self, public_id: str) -> UploadMeta:
+        """Load UploadMeta for a public_id."""
         working_dir = self.working_root / public_id
         upload_meta = working_dir / "meta.json"
         
         return UploadMeta.readJson(upload_meta)
     
     def _failed(self, pid:str, public_id: str) -> None:
+        """Cleanup a failed upload."""
         self._PSDBM.remove(pid, public_id=public_id)
         working_dir = self.working_root / public_id
         
@@ -315,7 +354,7 @@ class MultiPartUploader:
         self._PSDBM.commit()
         
     def register(self, filename: str, size: int, pid: str, permission_id: str | None, total_chunks: int, sha256: str) -> str:
-        "returns public_id"
+        """Register an upload and return public_id."""
         if size <= 0 or total_chunks <= 0:
             raise PsArgmentsError()
         
@@ -337,6 +376,7 @@ class MultiPartUploader:
         return public_id
         
     def parts_upload(self, pid: str, public_id: str, count: int, blob: bytes, sha256: str) -> None:
+        """Upload a single chunk and verify its checksum."""
         working_dir = self.working_root / public_id
         upload_meta = working_dir / "meta.json"
         
@@ -371,6 +411,7 @@ class MultiPartUploader:
             self._PSDBM.status_change(fMeta.contents_id, "UPLOADING")
         
     def commit(self, pid: str, public_id: str) -> FileMeta:
+        """Assemble chunks, validate checksum/size, and move to contents."""
         fMeta: FileMeta = self._PSDBM.getMeta(public_id=public_id)
         file_suffix = Path(fMeta.filename).suffix
         

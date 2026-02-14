@@ -65,9 +65,11 @@ class Response:
         yield self.body
 
     def append_header(self, key: str, value: str) -> None:
+        """Append a response header (no dedupe)."""
         self.headers.append((key, value))
 
 class HtmlResponse(Response):
+    """HTML response with text/html content type."""
     def __init__(
         self,
         body: str | bytes = b"",
@@ -90,6 +92,7 @@ class HtmlResponse(Response):
 
 
 class JsonResponse(Response):
+    """JSON response with application/json content type."""
     def __init__(
         self,
         body: Optional[dict] = None,

@@ -56,7 +56,7 @@ class Path:
         self.detection_range: int = detection_index
 
     def _read_args(self, request_path: str) -> dict[str, Optional[str]]:
-        """Build args for this request. (No shared state)"""
+        """Build args for this request (no shared state)."""
         args: dict[str, Optional[str]] = {}
         segments = request_path.strip("/").split("/") if request_path.strip("/") else [""]
         for idx, arg_name in self.path_args.items():
@@ -68,6 +68,9 @@ class Path:
         request: Request,
         middlewares: tuple[Middleware, ...] = (),
     ) -> Response:
+        """
+        Execute the handler (and middlewares) and normalize the result.
+        """
         try:
             args = self._read_args(request.path)
 
@@ -97,11 +100,13 @@ class Path:
 # ====================
 
 class Get(Path):
+    """GET-only route."""
     def __init__(self, path: str, handler: Handler, name: str):
         super().__init__(path, handler, name, methods={"GET"})
 
 
 class Post(Path):
+    """POST-only route (plus OPTIONS for preflight)."""
     def __init__(self, path: str, handler: Handler, name: str):
         super().__init__(path, handler, name, methods={"POST", "OPTIONS"})
 
@@ -118,6 +123,7 @@ class Static(Path):
         super().__init__(path, self._access, name)
 
     def _access(self, request: Request, args: dict[str, Optional[str]]) -> Response:
+        """Serve a static file from the configured root."""
         segments = request.path.strip("/").split("/") if request.path.strip("/") else [""]
         relative_parts = segments[self.detection_range :] if len(segments) > self.detection_range else []
         rel = _Path(*relative_parts) if relative_parts else _Path("")
@@ -166,9 +172,15 @@ class Router(list[Path]):
             raise PathlibTypeError
 
     def add_middleware(self, *middlewares: Middleware) -> None:
+        """Register middleware(s) for this router."""
         self.middlewares.extend(middlewares)
 
     def get(self, request_path: str, *, method: str | None = None) -> Path | None:
+        """
+        Resolve a Path for a request path and method.
+
+        Returns None if not found and raise_if_not_exist is False.
+        """
         segments = request_path.rstrip("/").split("/")
         method_u = method.upper() if method else None
 
@@ -197,6 +209,7 @@ class Router(list[Path]):
         return None
 
     def handle(self, request: Request) -> Response:
+        """Resolve and execute a route for the given request."""
         path = self.get(request.path, method=request.method)
         if path is None:
             raise PathNotFoundError(request.path)

@@ -36,12 +36,15 @@ class AppLogger:
         self.access_path = self._norm(access)
 
     def info(self, msg: str) -> None:
+        """Write an INFO log line."""
         self._write(self.info_path, "INFO", msg)
 
     def warn(self, msg: str) -> None:
+        """Write a WARN log line."""
         self._write(self.warn_path, "WARN", msg)
 
     def error(self, err: Exception | str) -> None:
+        """Write an ERROR log line (with traceback if Exception)."""
         if isinstance(err, Exception):
             msg = "".join(traceback.format_exception(err))
         else:
@@ -49,6 +52,7 @@ class AppLogger:
         self._write(self.error_path, "ERROR", msg)
 
     def access(self, msg: str) -> None:
+        """Write an ACCESS log line."""
         self._write(self.access_path, "ACCESS", msg)
 
     # ---------- internal ----------
@@ -90,15 +94,19 @@ class AuthLogger:
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def login_success(self, *, user_id: str, ip: str | None = None) -> None:
+        """Log a successful login."""
         self._write("LOGIN_OK", user_id, ip)
 
     def login_failed(self, *, user_id: str, ip: str | None = None) -> None:
+        """Log a failed login."""
         self._write("LOGIN_NG", user_id, ip)
 
     def signup(self, *, user_id: str, ip: str | None = None) -> None:
+        """Log a signup event."""
         self._write("SIGNUP", user_id, ip)
 
     def token_invalid(self, *, token: str | None, ip: str | None = None) -> None:
+        """Log an invalid token attempt."""
         t = token[:8] + "..." if token else "none"
         self._write("TOKEN_INVALID", t, ip)
 

@@ -16,6 +16,7 @@ from typing import Iterable
 
 @dataclass(frozen=True)
 class DetectedApp:
+    """Detected app directory with wsgi and gunicorn config."""
     name: str
     dir: Path
     wsgi: Path
@@ -31,6 +32,7 @@ def _is_windows() -> bool:
 
 
 def _detect_apps(project_root: Path) -> list[DetectedApp]:
+    """Scan project_root for runnable apps."""
     root = project_root.resolve()
     if not root.exists() or not root.is_dir():
         raise RunError("Project root is not a directory.")

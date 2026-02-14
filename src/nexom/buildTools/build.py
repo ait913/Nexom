@@ -11,6 +11,7 @@ import shutil
 
 @dataclass(frozen=True)
 class AppBuildOptions:
+    """Options for generated app configuration."""
     address: str = "0.0.0.0"
     port: int = 8080
     workers: int = 4
@@ -97,6 +98,11 @@ def create_app(
     gateway_config: str | None = None,
     domain: str = "",
 ) -> Path:
+    """
+    Create a new Nexom app scaffold.
+
+    Copies template assets and writes config/gunicorn/wsgi files.
+    """
     _validate_app_name(app_name)
     options = options or AppBuildOptions()
 
@@ -198,6 +204,7 @@ def create_auth(
     *,
     options: AppBuildOptions | None = None,
 ) -> Path:
+    """Create a new Nexom auth app scaffold."""
     options = options or AppBuildOptions(port=7070)
 
     project_root = Path(project_dir).expanduser().resolve()
