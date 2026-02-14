@@ -1,32 +1,51 @@
 <Extends base />
 <Insert main>
-<div class="article-container">
-<h1 id="nexom">README</h1>
-<p>Lightweight Python Web Framework (WSGI)</p>
-<p>Nexomは短いコードで最低限動作し、シンプルで理解のしやすい設計・構造を目指しています。<br>
-また細かい仕様も変更でき、多様な処理に対応します。</p>
-<h2 id="はじめる">はじめる </h2>
-<p>最初のサーバーを起動するには、3つの手順が必要です。</p>
-<ol>
-<li>プロジェクトディレクトリを作成</li>
-<li>nexomをpipでインストール、プロジェクトのビルド</li>
-<li>起動</li>
-</ol>
-<h3 id="1プロジェクトディレクトリの作成">1.プロジェクトディレクトリの作成 </h3>
-<p><strong>準備</strong></p>
-<p>用意していない場合はディレクトリを作成し、仮想環境も準備してください</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>mkdir banana_project
+    <div class="article-container">
+        <h1>Nexom</h1>
+        <p>Lightweight Python Web Framework (WSGI)</p>
+        <p>Nexomは短いコードで最低限動作し、シンプルで理解のしやすい設計・構造を目指しています。<br />
+            また細かい仕様も変更でき、多様な処理に対応します。</p>
+        <h2 class="fz-xl">主な機能セット</h2>
+        <ul style="list-style-type:bullet;" class="my-0.5r">
+            <li>WSGIベースの軽量Webフレームワーク</li>
+            <li>ルーティング（GET/POST、動的パス引数）</li>
+            <li>静的ファイル配信</li>
+            <li>Request/ResponseのシンプルAPI（HTML/JSON/Redirect/エラーページ）</li>
+            <li>テンプレート（ObjectHTML: extends/import/slot）</li>
+            <li>ビルドイン標準認証サーバー＆クライアント（AuthService/AuthClient）</li>
+            <li>Cookie管理</li>
+            <li>ミドルウェア対応</li>
+            <li>プロジェクト生成（buildTools）</li>
+            <li>マルチパートアップロードと並列ストレージ基盤（ParallelStorage/MultiPartUploader）</li>
+        </ul>
+        <h2 class="fz-xl">はじめる</h2>
+        <p>最初のサーバーを起動するには、3つの手順が必要です。</p>
+        <ol style="list-style-type:decimal;" class="my-0.5r">
+            <li>プロジェクトディレクトリを作成</li>
+            <li>nexomをpipでインストール、プロジェクトのビルド</li>
+            <li>起動</li>
+        </ol>
+        <h3 class="fz-ml">1.プロジェクトディレクトリの作成</h3>
+        <p><b class="bold">準備</b></p>
+        <p>用意していない場合はディレクトリを作成し、仮想環境も準備してください</p>
+        <pre><code class="language-">mkdir banana_project
 cd banana_project
 
 python -m venv venv
-source venv/bin/activate</code></pre><h3 id="2-pipでインストール-サーバーのビルド">2. pipでインストール、サーバーのビルド </h3>
-<p><strong>インストール</strong></p>
-<p>nexomをインストールします。</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>pip install</code></pre><p><strong>プロジェクトのビルド</strong></p>
-<p>プロジェクトディレクトリ上で、以下のコマンドを実行してください(名前は自由)<br>
-もしNginxもしくはApacheを使用する場合 --gateway オプションにどちらか入力してください</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom start-project</code></pre><p>以下の構成でプロジェクトが生成されます。</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>banana_project/
+source venv/bin/activate
+</code></pre>
+        <h3 class="fz-ml">2. pipでインストール、サーバーのビルド</h3>
+        <p><b class="bold">インストール</b></p>
+        <p>nexomをインストールします。</p>
+        <pre><code class="language-">pip install
+</code></pre>
+        <p><b class="bold">プロジェクトのビルド</b></p>
+        <p>プロジェクトディレクトリ上で、以下のコマンドを実行してください</p>
+        <p>もしNginxもしくはApacheを使用する場合 --gateway オプションにどちらか入力してください</p>
+        <pre><code class="language-">$ python -m nexom start-project # --gateway nginx or apache
+</code></pre>
+        <p>以下の構成でプロジェクトが生成されます。</p>
+        <pre><code class="language-">banana_project/
 ├─ app/
 │  ├─ pages/
 │  │  ├─ __init__.py
@@ -53,56 +72,68 @@ source venv/bin/activate</code></pre><h3 id="2-pipでインストール-サー�
    │  └─ * app db *
    └─ gateway/
       ├─ app.nginx.conf
-      └─ app.apache.conf</code></pre><h3 id="3起動">3.起動 </h3>
-<p>以下のコマンドを起動します。</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>$ python -m nexom run</code></pre><p>ブラウザからアクセスできるようになります。<br>
-デフォルトのポートは8080です。</p>
-<p><a href="http://localhost:8080">http://localhost:8080</a></p>
-<p>ポートなどの設定は <code>config.py</code> から変更してください。</p>
-<h2 id="nginx等使用して外部公開する">Nginx等使用して外部公開する </h2>
-<p>gatewayディレクトリにある設定を読み込んでください</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>http {
+      └─ app.apache.conf
+</code></pre>
+        <h3 class="fz-ml">3.起動</h3>
+        <p>以下のコマンドを起動します。</p>
+        <pre><code class="language-">$ python -m nexom run
+</code></pre>
+        <p>ブラウザからアクセスできるようになります。<br />
+            デフォルトのポートは8080です。</p>
+        <p><a href="http://localhost:8080" class="link">http://localhost:8080</a></p>
+        <p>ポートなどの設定は <code>config.py</code> から変更してください。</p>
+        <h2 class="fz-xl">Nginx等使用して外部公開する</h2>
+        <p>gatewayディレクトリにある設定を読み込んでください</p>
+        <pre><code class="language-">http {
     include /home/ubuntu/banana_project/gateway/*.conf;
-}</code></pre><h2 id="systemdに登録して自動起動する">Systemdに登録して自動起動する </h2>
-<p><strong>Ubuntuの場合</strong></p>
-<ol>
-<li><code>/etc/systemd/system</code> に、 <code>banana_sample.service</code> を作成します。</li>
-<li><code>banana_sample.service</code> に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)</li>
-</ol>
-<p>サーバーのディレクトリが <code>/home/ubuntu/banana_project</code> にある場合</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>[Unit]
+}
+</code></pre>
+        <h2 class="fz-xl">Systemdに登録して自動起動する</h2>
+        <p><b class="bold">Ubuntuの場合</b></p>
+        <ol style="list-style-type:decimal;" class="my-0.5r">
+            <li><code>/etc/systemd/system</code> に、 <code>banana_sample.service</code> を作成します。</li>
+            <li><code>banana_sample.service</code> に以下を書き込みます。(これは一例です。環境に合わせて設定してください。)</li>
+        </ol>
+        <p>サーバーのディレクトリが <code>/home/ubuntu/banana_project</code> にある場合</p>
+        <pre><code class="language-">&lsqb;Unit&rsqb;
 Description=Nexom Web Freamework
 After=network.target
 
-[Service]
+&lsqb;Service&rsqb;
 User=www-data
 Group=www-data
 WorkingDirectory=/home/ubuntu/banana_project
-Environment="PYTHONPATH=/home/ubuntu/banana_project"
+Environment=&quot;PYTHONPATH=/home/ubuntu/banana_project&quot;
 ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn sample.wsgi:app --config sample/gunicorn.conf.py
 Restart=always
 RestartSec=3
-[Install]
-WantedBy=multi-user.target</code></pre><p>以下のコマンドを実行します</p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
+&lsqb;Install&rsqb;
+WantedBy=multi-user.target
+</code></pre>
+        <p>以下のコマンドを実行します</p>
+        <pre><code class="language-">sudo systemd daemon-reload
 sudo systemd enable banana_sample
-sudo systemd start banana_sample</code></pre><h3 id="テンプレートユニットを活用して複数のアプリを効率的に管理">テンプレートユニットを活用して複数のアプリを効率的に管理 </h3>
-<p>テンプレートユニットを活用し .service ファイルを一枚にまとめられます。</p>
-<p><code>/etc/systemd/system/banana-project@.service</code></p>
-<pre data-role="codeBlock" data-info="" class="language-text"><code>[Unit]
+sudo systemd start banana_sample
+</code></pre>
+        <h3 class="fz-ml">テンプレートユニットを活用して複数のアプリを効率的に管理</h3>
+        <p>テンプレートユニットを活用し .service ファイルを一枚にまとめられます。</p>
+        <p><code>/etc/systemd/system/banana-project@.service</code></p>
+        <pre><code class="language-">&lsqb;Unit&rsqb;
 Description=Nexom Web Server (%i)
 After=network.target
 
-[Service]
+&lsqb;Service&rsqb;
 User=www-data
 Group=www-data
 WorkingDirectory=/home/ubuntu/banana_project
-Environment="PYTHONPATH=/home/ubuntu/banana_project"
+Environment=&quot;PYTHONPATH=/home/ubuntu/banana_project&quot;
 ExecStart=/home/ubuntu/banana_project/venv/bin/gunicorn ％iwsgi:app --config %i/gunicorn.conf.py
 Restart=always
 RestartSec=3
-[Install]
-WantedBy=multi-user.target</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>sudo systemd daemon-reload
+&lsqb;Install&rsqb;
+WantedBy=multi-user.target
+</code></pre>
+        <pre><code class="language-">sudo systemd daemon-reload
 
 sudo systemd enable banana-project@banana1
 sudo systemd enable banana-project@banana2
@@ -110,6 +141,8 @@ sudo systemd enable banana-project@banana3
 
 sudo systemd start banana-project@banana1
 sudo systemd start banana-project@banana2
-sudo systemd start banana-project@banana3</code></pre><p>2026 1/27</p>
-</div>
+sudo systemd start banana-project@banana3
+</code></pre>
+        <p>2026 1/28</p>
+    </div>
 </Insert>
