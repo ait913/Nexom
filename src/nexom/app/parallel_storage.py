@@ -120,8 +120,9 @@ class ParallelStorage:
 
     Provides PSC path formatting, status updates, and image compression helpers.
     """
-    def __init__(self, db_file:str, contents_dir: str) -> None:
+    def __init__(self, db_file:str, contents_dir: str, working_dir: str | None = None) -> None:
         self.contents_dir = Path(contents_dir)
+        self.working_dir = Path(working_dir) if working_dir else None
         
         self._PSDBM = ParallelStorageDBM(db_file)
         
@@ -213,6 +214,34 @@ class ParallelStorage:
     def getMeta(self, public_id: str) -> FileMeta:
         """Get FileMeta"""
         return self._PSDBM.getMeta(public_id=public_id)
+    
+    def delete(self, pid: str, public_id: str, *, force: bool = False) -> None:
+        """
+        Delete a content record and related files.
+
+        Targets:
+        - DB record in parallel_storage
+        - content files in contents_dir matching "<contents_id>__PSC_*"
+        - worker directory "<working_dir>/<public_id>" when working_dir is configured
+        """
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+
+        if (not force) and (fMeta.pid != pid):
+            raise PsPermissionError()
+
+        # Remove content and cache files first, then DB record.
+        self.contents_dir.mkdir(parents=True, exist_ok=True)
+        for path in self.contents_dir.glob(f"{fMeta.contents_id}__PSC_*"):
+            if path.is_dir():
+                shutil.rmtree(str(path), ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+
+        if self.working_dir:
+            worker = self.working_dir / public_id
+            shutil.rmtree(str(worker), ignore_errors=True)
+
+        self._PSDBM.remove(pid if not force else None, public_id=public_id)
 
 
 class ParallelStorageDBM(DatabaseManager):
