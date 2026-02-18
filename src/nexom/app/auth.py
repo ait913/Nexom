@@ -97,6 +97,49 @@ class Session:
     user_agent: str | None
 
 
+class Permissions:
+    """
+    Group-scoped permissions helper for AuthClient.
+
+    Usage:
+        perms = client.permissions("group-a", token=token)
+        level = perms.auth(pid)
+        perms.upsert(pid, 10)
+    """
+
+    def __init__(self, client: "AuthClient", group_id: str, token: str):
+        self._client = client
+        self.group_id = group_id
+        self.token = token
+
+    def auth(self, pid: str) -> int:
+        d = self._client._post(
+            self._client.permissions_group_auth_url,
+            {"token": self.token, "group_id": self.group_id, "pid": pid},
+        )
+        if not d.get("ok"):
+            self._client._raise_from_error_code(str(d.get("error") or ""))
+        return int(d.get("level") or 0)
+
+    def upsert(self, pid: str, level: int) -> None:
+        d = self._client._post(
+            self._client.permissions_group_member_upsert_url,
+            {"token": self.token, "group_id": self.group_id, "pid": pid, "level": level},
+        )
+        if d.get("ok"):
+            return
+        self._client._raise_from_error_code(str(d.get("error") or ""))
+
+    def delete(self, pid: str) -> None:
+        d = self._client._post(
+            self._client.permissions_group_member_delete_url,
+            {"token": self.token, "group_id": self.group_id, "pid": pid},
+        )
+        if d.get("ok"):
+            return
+        self._client._raise_from_error_code(str(d.get("error") or ""))
+
+
 # --------------------
 # AuthService (API only)
 # --------------------
@@ -132,6 +175,10 @@ class AuthService:
             Path(_p("verify"), self.verify, "AuthVerify"),
             Path(_p("update/public-name"), self.update_public_name, "AuthUpdatePublicName"),
             Path(_p("update/password"), self.update_password, "AuthUpdatePassword"),
+            Path(_p("permissions/group/create"), self.permissions_group_create, "PermissionsGroupCreate"),
+            Path(_p("permissions/group/member/upsert"), self.permissions_group_member_upsert, "PermissionsMemberUpsert"),
+            Path(_p("permissions/group/member/delete"), self.permissions_group_member_delete, "PermissionsMemberDelete"),
+            Path(_p("permissions/group/auth"), self.permissions_group_auth, "PermissionsGroupAuth"),
         )
 
         self.logger = AuthLogger(log_path)
@@ -297,6 +344,101 @@ class AuthService:
         self.dbm.update_password(uid=lsess.uid, current_password=current_password, new_password=new_password)
         return JsonResponse({"ok": True})
 
+    def permissions_group_create(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """Create a permission group owned by the authenticated user."""
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        group_id = str(data.get("group_id") or "").strip()
+        name = str(data.get("name") or "").strip()
+        if not token:
+            raise AuthTokenMissingError()
+        if not group_id:
+            raise AuthMissingFieldError("group_id")
+        if not name:
+            raise AuthMissingFieldError("name")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+
+        self.dbm.create_permission_group(owner_uid=lsess.uid, group_id=group_id, name=name)
+        return JsonResponse({"ok": True, "group_id": group_id})
+
+    def permissions_group_member_upsert(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """Upsert a member level in the group (owner only)."""
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        group_id = str(data.get("group_id") or "").strip()
+        pid = str(data.get("pid") or "").strip()
+        level_raw = data.get("level")
+        if not token:
+            raise AuthTokenMissingError()
+        if not group_id:
+            raise AuthMissingFieldError("group_id")
+        if not pid:
+            raise AuthMissingFieldError("pid")
+        if not isinstance(level_raw, int):
+            raise AuthMissingFieldError("level")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+        self.dbm.assert_permission_group_owner(group_id=group_id, owner_uid=lsess.uid)
+        self.dbm.upsert_permission_member_by_pid(group_id=group_id, pid=pid, level=level_raw)
+        return JsonResponse({"ok": True})
+
+    def permissions_group_member_delete(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """Delete a member from the group (owner only)."""
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        group_id = str(data.get("group_id") or "").strip()
+        pid = str(data.get("pid") or "").strip()
+        if not token:
+            raise AuthTokenMissingError()
+        if not group_id:
+            raise AuthMissingFieldError("group_id")
+        if not pid:
+            raise AuthMissingFieldError("pid")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+        self.dbm.assert_permission_group_owner(group_id=group_id, owner_uid=lsess.uid)
+        self.dbm.delete_permission_member_by_pid(group_id=group_id, pid=pid)
+        return JsonResponse({"ok": True})
+
+    def permissions_group_auth(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """Resolve permission level for group_id and pid."""
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        group_id = str(data.get("group_id") or "").strip()
+        pid = str(data.get("pid") or "").strip()
+        if not token:
+            raise AuthTokenMissingError()
+        if not group_id:
+            raise AuthMissingFieldError("group_id")
+        if not pid:
+            raise AuthMissingFieldError("pid")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+
+        level = self.dbm.auth_permission_level_by_pid(group_id=group_id, pid=pid)
+        return JsonResponse({"ok": True, "group_id": group_id, "pid": pid, "level": level})
+
 
 # --------------------
 # AuthClient (App側)
@@ -317,6 +459,10 @@ class AuthClient:
         self.verify_url = base + "/verify"
         self.update_public_name_url = base + "/update/public-name"
         self.update_password_url = base + "/update/password"
+        self.permissions_group_create_url = base + "/permissions/group/create"
+        self.permissions_group_member_upsert_url = base + "/permissions/group/member/upsert"
+        self.permissions_group_member_delete_url = base + "/permissions/group/member/delete"
+        self.permissions_group_auth_url = base + "/permissions/group/auth"
         self.timeout = timeout
 
     def _post(self, url: str, body: dict) -> dict:
@@ -410,6 +556,20 @@ class AuthClient:
             return
         self._raise_from_error_code(str(d.get("error") or ""))
 
+    def create_permission_group(self, *, token: str, group_id: str, name: str) -> str:
+        """Create a permission group and return group_id."""
+        d = self._post(
+            self.permissions_group_create_url,
+            {"token": token, "group_id": group_id, "name": name},
+        )
+        if not d.get("ok"):
+            self._raise_from_error_code(str(d.get("error") or ""))
+        return str(d.get("group_id") or group_id)
+
+    def permissions(self, group_id: str, *, token: str) -> Permissions:
+        """Return a group-scoped permissions helper."""
+        return Permissions(self, group_id, token)
+
     def _raise_from_error_code(self, code: str) -> None:
         if code == "A01":
             raise AuthMissingFieldError("unknown")
@@ -471,6 +631,29 @@ class AuthDBM(DatabaseManager):
                         expires_at INTEGER NOT NULL,
                         revoked_at INTEGER,
                         user_agent TEXT
+                    );
+                    """,
+                    (),
+                ),
+                (
+                    """
+                    CREATE TABLE IF NOT EXISTS permission_groups (
+                        group_id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        owner_uid TEXT NOT NULL REFERENCES users(uid),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """,
+                    (),
+                ),
+                (
+                    """
+                    CREATE TABLE IF NOT EXISTS permission_group_members (
+                        group_id TEXT NOT NULL REFERENCES permission_groups(group_id) ON DELETE CASCADE,
+                        uid TEXT NOT NULL REFERENCES users(uid),
+                        level INTEGER NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (group_id, uid)
                     );
                     """,
                     (),
@@ -619,3 +802,81 @@ class AuthDBM(DatabaseManager):
             _now(),
             uid,
         )
+
+    def get_uid_by_pid(self, pid: str) -> str | None:
+        """Resolve uid from pid (pid is treated as uid in current auth model)."""
+        if not pid:
+            return None
+        rows = self.execute("SELECT uid FROM users WHERE uid=?", pid)
+        if not rows:
+            return None
+        return str(rows[0][0])
+
+    def create_permission_group(self, *, owner_uid: str, group_id: str, name: str) -> None:
+        """Create a permission group."""
+        try:
+            self.execute(
+                "INSERT INTO permission_groups(group_id, name, owner_uid) VALUES(?,?,?)",
+                group_id,
+                name,
+                owner_uid,
+            )
+        except DBIntegrityError:
+            raise AuthUserIdAlreadyExistsError()
+
+    def assert_permission_group_owner(self, *, group_id: str, owner_uid: str) -> None:
+        """Ensure owner_uid owns group_id."""
+        rows = self.execute(
+            "SELECT owner_uid FROM permission_groups WHERE group_id=?",
+            group_id,
+        )
+        if not rows:
+            raise AuthInvalidCredentialsError()
+        if str(rows[0][0]) != owner_uid:
+            raise AuthInvalidCredentialsError()
+
+    def upsert_permission_member_by_pid(self, *, group_id: str, pid: str, level: int) -> None:
+        """Upsert member level by pid."""
+        if level < 0:
+            raise AuthMissingFieldError("level")
+        uid = self.get_uid_by_pid(pid)
+        if uid is None:
+            raise AuthInvalidCredentialsError()
+
+        self.execute(
+            """
+            INSERT INTO permission_group_members(group_id, uid, level, updated_at)
+            VALUES(?,?,?,CURRENT_TIMESTAMP)
+            ON CONFLICT(group_id, uid) DO UPDATE SET
+                level=excluded.level,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            group_id,
+            uid,
+            level,
+        )
+
+    def delete_permission_member_by_pid(self, *, group_id: str, pid: str) -> None:
+        """Delete a member by pid from a group."""
+        uid = self.get_uid_by_pid(pid)
+        if uid is None:
+            return
+        self.execute(
+            "DELETE FROM permission_group_members WHERE group_id=? AND uid=?",
+            group_id,
+            uid,
+        )
+
+    def auth_permission_level_by_pid(self, *, group_id: str, pid: str) -> int:
+        """Return permission level for group_id and pid, default 0."""
+        uid = self.get_uid_by_pid(pid)
+        if uid is None:
+            return 0
+        rows = self.execute(
+            "SELECT level FROM permission_group_members WHERE group_id=? AND uid=?",
+            group_id,
+            uid,
+        )
+        if not rows:
+            return 0
+        return int(rows[0][0])

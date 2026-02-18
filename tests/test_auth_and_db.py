@@ -116,3 +116,59 @@ def test_auth_service_update_password_revokes_sessions(tmp_path):
     body = json.dumps({"user_id": "u4", "password": "pw4new"}).encode("utf-8")
     res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
     assert res.status_code == 200
+
+
+def test_permissions_group_flow(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(str(db_path), str(log_path))
+
+    # owner signup/login
+    body = json.dumps({"user_id": "owner", "public_name": "Owner", "password": "pw"}).encode("utf-8")
+    svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    body = json.dumps({"user_id": "owner", "password": "pw"}).encode("utf-8")
+    owner_login = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    owner_data = _json_response(owner_login)
+    owner_token = owner_data["token"]
+    owner_pid = owner_data["pid"]
+
+    # member signup/login
+    body = json.dumps({"user_id": "member", "public_name": "Member", "password": "pw"}).encode("utf-8")
+    svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    body = json.dumps({"user_id": "member", "password": "pw"}).encode("utf-8")
+    member_login = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    member_data = _json_response(member_login)
+    member_pid = member_data["pid"]
+
+    # create group
+    body = json.dumps({"token": owner_token, "group_id": "g1", "name": "Group1"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/create", body=body, content_type="application/json")
+    )
+    assert res.status_code == 200
+
+    # upsert member level
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid, "level": 7}).encode("utf-8")
+    res = svc.handler(
+        make_environ(
+            method="POST",
+            path="/permissions/group/member/upsert",
+            body=body,
+            content_type="application/json",
+        )
+    )
+    assert res.status_code == 200
+
+    # auth lookup
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
+    )
+    assert _json_response(res)["level"] == 7
+
+    # missing member -> level 0
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": owner_pid}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
+    )
+    assert _json_response(res)["level"] == 0
