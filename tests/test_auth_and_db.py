@@ -51,3 +51,68 @@ def test_auth_dbm_basic(tmp_path):
     assert v is not None
     dbm.logout(sess.token)
     assert dbm.verify(sess.token) is None
+
+
+def test_auth_service_update_public_name(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(str(db_path), str(log_path))
+
+    body = json.dumps({"user_id": "u3", "public_name": "User3", "password": "pw3"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    assert res.status_code == 201
+
+    body = json.dumps({"user_id": "u3", "password": "pw3"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    token = _json_response(res)["token"]
+
+    body = json.dumps({"token": token, "public_name": "Renamed"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/update/public-name", body=body, content_type="application/json")
+    )
+    data = _json_response(res)
+    assert res.status_code == 200
+    assert data["ok"] is True
+    assert data["public_name"] == "Renamed"
+
+    body = json.dumps({"token": token}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/verify", body=body, content_type="application/json"))
+    assert _json_response(res)["public_name"] == "Renamed"
+
+
+def test_auth_service_update_password_revokes_sessions(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(str(db_path), str(log_path))
+
+    body = json.dumps({"user_id": "u4", "public_name": "User4", "password": "pw4"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    assert res.status_code == 201
+
+    body = json.dumps({"user_id": "u4", "password": "pw4"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    token = _json_response(res)["token"]
+
+    body = json.dumps(
+        {"token": token, "current_password": "pw4", "new_password": "pw4new"}
+    ).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/update/password", body=body, content_type="application/json")
+    )
+    assert res.status_code == 200
+    assert _json_response(res)["ok"] is True
+
+    # old token is revoked
+    body = json.dumps({"token": token}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/verify", body=body, content_type="application/json"))
+    assert _json_response(res)["active"] is False
+
+    # old password fails
+    body = json.dumps({"user_id": "u4", "password": "pw4"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    assert res.status_code == 401
+
+    # new password succeeds
+    body = json.dumps({"user_id": "u4", "password": "pw4new"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    assert res.status_code == 200

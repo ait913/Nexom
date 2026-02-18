@@ -130,6 +130,8 @@ class AuthService:
             Path(_p("login"), self.login, "AuthLogin"),
             Path(_p("logout"), self.logout, "AuthLogout"),
             Path(_p("verify"), self.verify, "AuthVerify"),
+            Path(_p("update/public-name"), self.update_public_name, "AuthUpdatePublicName"),
+            Path(_p("update/password"), self.update_password, "AuthUpdatePassword"),
         )
 
         self.logger = AuthLogger(log_path)
@@ -244,6 +246,57 @@ class AuthService:
             status=200,
         )
 
+    def update_public_name(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Update public_name for the authenticated user.
+
+        Expected JSON: {token, public_name}
+        """
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        public_name = str(data.get("public_name") or "").strip()
+        if not token:
+            raise AuthTokenMissingError()
+        if not public_name:
+            raise AuthMissingFieldError("public_name")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+
+        self.dbm.update_public_name(uid=lsess.uid, public_name=public_name)
+        return JsonResponse({"ok": True, "public_name": public_name})
+
+    def update_password(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Update password for the authenticated user.
+
+        Expected JSON: {token, current_password, new_password}
+        """
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        current_password = str(data.get("current_password") or "")
+        new_password = str(data.get("new_password") or "")
+        if not token:
+            raise AuthTokenMissingError()
+        if not current_password:
+            raise AuthMissingFieldError("current_password")
+        if not new_password:
+            raise AuthMissingFieldError("new_password")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+
+        self.dbm.update_password(uid=lsess.uid, current_password=current_password, new_password=new_password)
+        return JsonResponse({"ok": True})
+
 
 # --------------------
 # AuthClient (App側)
@@ -262,6 +315,8 @@ class AuthClient:
         self.login_url = base + "/login"
         self.logout_url = base + "/logout"
         self.verify_url = base + "/verify"
+        self.update_public_name_url = base + "/update/public-name"
+        self.update_password_url = base + "/update/password"
         self.timeout = timeout
 
     def _post(self, url: str, body: dict) -> dict:
@@ -327,6 +382,30 @@ class AuthClient:
     def logout(self, *, token: str) -> None:
         """Logout (revoke) a session token."""
         d = self._post(self.logout_url, {"token": token})
+        if d.get("ok"):
+            return
+        self._raise_from_error_code(str(d.get("error") or ""))
+
+    def update_public_name(self, *, token: str, public_name: str) -> str:
+        """Update public_name and return the updated value."""
+        d = self._post(
+            self.update_public_name_url,
+            {"token": token, "public_name": public_name},
+        )
+        if not d.get("ok"):
+            self._raise_from_error_code(str(d.get("error") or ""))
+        return str(d.get("public_name") or "")
+
+    def update_password(self, *, token: str, current_password: str, new_password: str) -> None:
+        """Update password for an authenticated user."""
+        d = self._post(
+            self.update_password_url,
+            {
+                "token": token,
+                "current_password": current_password,
+                "new_password": new_password,
+            },
+        )
         if d.get("ok"):
             return
         self._raise_from_error_code(str(d.get("error") or ""))
@@ -497,3 +576,46 @@ class AuthDBM(DatabaseManager):
             return None
 
         return LocalSession(str(sid), str(uid), str(user_id), str(public_name), str(token), int(exp), None, ua)
+
+    def update_public_name(self, *, uid: str, public_name: str) -> None:
+        """Update the user's public_name."""
+        if not public_name:
+            raise AuthMissingFieldError("public_name")
+        self.execute(
+            "UPDATE users SET public_name=? WHERE uid=?",
+            public_name,
+            uid,
+        )
+
+    def update_password(self, *, uid: str, current_password: str, new_password: str) -> None:
+        """Change password after validating the current password."""
+        if not current_password:
+            raise AuthMissingFieldError("current_password")
+        if not new_password:
+            raise AuthMissingFieldError("new_password")
+
+        rows = self.execute(
+            "SELECT password_hash, password_salt FROM users WHERE uid=?",
+            uid,
+        )
+        if not rows:
+            raise AuthInvalidCredentialsError()
+
+        pw_hash, salt = rows[0]
+        if not hmac.compare_digest(_hash_password(current_password, str(salt)), str(pw_hash)):
+            raise AuthInvalidCredentialsError()
+
+        new_salt = _make_salt()
+        self.execute(
+            "UPDATE users SET password_hash=?, password_salt=? WHERE uid=?",
+            _hash_password(new_password, new_salt),
+            new_salt,
+            uid,
+        )
+
+        # Revoke all existing sessions for this user after password change.
+        self.execute(
+            "UPDATE sessions SET revoked_at=? WHERE uid=? AND revoked_at IS NULL",
+            _now(),
+            uid,
+        )
