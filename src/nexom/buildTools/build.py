@@ -209,6 +209,8 @@ def create_auth(
 
     project_root = Path(project_dir).expanduser().resolve()
     project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "db" / "auth").mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "log" / "auth").mkdir(parents=True, exist_ok=True)
 
     app_root = project_root / "auth"
     if app_root.exists():
@@ -243,6 +245,58 @@ def create_auth(
     return app_root
 
 
+def create_config(
+    project_dir: str | Path,
+    app_name: str,
+    *,
+    options: AppBuildOptions | None = None,
+    auth: bool = False,
+) -> Path:
+    """
+    Create only config.py for an existing app directory.
+
+    Raises:
+    - FileNotFoundError: app directory does not exist
+    - FileExistsError: config.py already exists
+    """
+    _validate_app_name(app_name)
+    options = options or AppBuildOptions(port=7070 if auth else 8080)
+
+    project_root = Path(project_dir).expanduser().resolve()
+    app_root = project_root / app_name
+    if not app_root.exists() or not app_root.is_dir():
+        raise FileNotFoundError(f"Target app directory does not exist: {app_root}")
+
+    config_path = app_root / "config.py"
+    if config_path.exists():
+        raise FileExistsError(f"config.py already exists: {config_path}")
+
+    if auth:
+        pkg = "nexom.assets.auth"
+        (project_root / "data" / "db" / "auth").mkdir(parents=True, exist_ok=True)
+        (project_root / "data" / "log" / app_name).mkdir(parents=True, exist_ok=True)
+        app_name_for_template = "auth"
+    else:
+        pkg = "nexom.assets.app"
+        app_name_for_template = app_name
+
+    config_text = _read_text_from_package(pkg, "config.py")
+    config_enabled = _replace_many(
+        config_text,
+        {
+            "__prj_dir__": str(project_root),
+            "__app_name__": str(app_name_for_template),
+            "__app_dir__": str(app_root),
+            "__g_address__": options.address,
+            "__g_port__": str(options.port),
+            "__g_workers__": str(options.workers),
+            "__g_reload__": "True" if options.reload else "False",
+        },
+    )
+    config_path.write_text(config_enabled, encoding="utf-8")
+    return config_path
+
+
 def start_project(
     *,
     project_root: Path,
@@ -271,6 +325,7 @@ def start_project(
     data_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "auth").mkdir(parents=True, exist_ok=True)
 
     # main app + auth app
     main_opt = main_options or AppBuildOptions()
