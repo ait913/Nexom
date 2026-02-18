@@ -152,7 +152,7 @@ class ErrorResponse(Response):
     def __init__(self, status: int, message: str) -> None:
         html = self._render(status, message)
         
-        super().__init__(html, status=status)
+        super().__init__(html, status=status, content_type="text/html")
 
     @staticmethod
     def _render(status: int, message: str) -> str:
