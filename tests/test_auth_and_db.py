@@ -131,6 +131,7 @@ def test_permissions_group_flow(tmp_path):
     owner_data = _json_response(owner_login)
     owner_token = owner_data["token"]
     owner_pid = owner_data["pid"]
+    owner_user_id = owner_data["user_id"]
 
     # member signup/login
     body = json.dumps({"user_id": "member", "public_name": "Member", "password": "pw"}).encode("utf-8")
@@ -139,6 +140,7 @@ def test_permissions_group_flow(tmp_path):
     member_login = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
     member_data = _json_response(member_login)
     member_pid = member_data["pid"]
+    member_user_id = member_data["user_id"]
 
     # create group
     body = json.dumps({"token": owner_token, "group_id": "g1", "name": "Group1"}).encode("utf-8")
@@ -148,7 +150,7 @@ def test_permissions_group_flow(tmp_path):
     assert res.status_code == 200
 
     # upsert member level
-    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid, "level": 7}).encode("utf-8")
+    body = json.dumps({"token": owner_token, "group_id": "g1", "user_id": member_user_id, "level": 7}).encode("utf-8")
     res = svc.handler(
         make_environ(
             method="POST",
@@ -172,3 +174,73 @@ def test_permissions_group_flow(tmp_path):
         make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
     )
     assert _json_response(res)["level"] == 0
+
+    # groups mine
+    body = json.dumps({"token": member_data["token"]}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/groups/mine", body=body, content_type="application/json")
+    )
+    groups = _json_response(res)["groups"]
+    assert any(g["group_id"] == "g1" and g["level"] == 7 for g in groups)
+
+    # delete by user_id
+    body = json.dumps({"token": owner_token, "group_id": "g1", "user_id": member_user_id}).encode("utf-8")
+    res = svc.handler(
+        make_environ(
+            method="POST",
+            path="/permissions/group/member/delete",
+            body=body,
+            content_type="application/json",
+        )
+    )
+    assert res.status_code == 200
+
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
+    )
+    assert _json_response(res)["level"] == 0
+
+
+def test_master_users_list_and_deactivate(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(
+        str(db_path),
+        str(log_path),
+        master_user="master_user",
+        master_login_password="master_login_pw",
+        master_password="NexomWebFramework",
+    )
+
+    # login as master
+    body = json.dumps({"user_id": "master_user", "password": "master_login_pw"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    assert res.status_code == 200
+    master_token = _json_response(res)["token"]
+
+    # create normal user
+    body = json.dumps({"user_id": "u5", "public_name": "User5", "password": "pw5"}).encode("utf-8")
+    svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+
+    # list all users
+    body = json.dumps({"token": master_token}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/master/users/list", body=body, content_type="application/json"))
+    users = _json_response(res)["users"]
+    assert any(u["user_id"] == "master_user" for u in users)
+    assert any(u["user_id"] == "u5" for u in users)
+
+    # deactivate user
+    body = json.dumps(
+        {"token": master_token, "target_user_id": "u5", "master_password": "NexomWebFramework"}
+    ).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/master/users/deactivate", body=body, content_type="application/json")
+    )
+    assert res.status_code == 200
+    assert _json_response(res)["ok"] is True
+
+    # deactivated user cannot login
+    body = json.dumps({"user_id": "u5", "password": "pw5"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    assert res.status_code == 403

@@ -121,23 +121,35 @@ class Permissions:
             self._client._raise_from_error_code(str(d.get("error") or ""))
         return int(d.get("level") or 0)
 
-    def upsert(self, pid: str, level: int) -> None:
+    def upsert(self, user_id: str, level: int) -> None:
         d = self._client._post(
             self._client.permissions_group_member_upsert_url,
-            {"token": self.token, "group_id": self.group_id, "pid": pid, "level": level},
+            {"token": self.token, "group_id": self.group_id, "user_id": user_id, "level": level},
         )
         if d.get("ok"):
             return
         self._client._raise_from_error_code(str(d.get("error") or ""))
 
-    def delete(self, pid: str) -> None:
+    def delete(self, user_id: str) -> None:
         d = self._client._post(
             self._client.permissions_group_member_delete_url,
-            {"token": self.token, "group_id": self.group_id, "pid": pid},
+            {"token": self.token, "group_id": self.group_id, "user_id": user_id},
         )
         if d.get("ok"):
             return
         self._client._raise_from_error_code(str(d.get("error") or ""))
+
+    def groups_mine(self) -> list[dict]:
+        d = self._client._post(
+            self._client.permissions_groups_mine_url,
+            {"token": self.token},
+        )
+        if not d.get("ok"):
+            self._client._raise_from_error_code(str(d.get("error") or ""))
+        rows = d.get("groups")
+        if isinstance(rows, list):
+            return rows
+        return []
 
 
 # --------------------
@@ -158,10 +170,19 @@ class AuthService:
         log_path: str,
         *,
         ttl_sec: int = 60 * 60 * 24 * 7,
+        master_user: str = "master_user",
+        master_login_password: str = "",
+        master_password: str = "NexomWebFramework",
         prefix: str = "",
     ) -> None:
         self.dbm = AuthDBM(db_path)
         self.ttl_sec = ttl_sec
+        self.master_user = master_user
+        self.master_password = master_password
+        self.dbm.ensure_master_user(
+            user_id=master_user,
+            login_password=(master_login_password or _rand(18)),
+        )
 
         p = prefix.strip("/")
 
@@ -179,6 +200,9 @@ class AuthService:
             Path(_p("permissions/group/member/upsert"), self.permissions_group_member_upsert, "PermissionsMemberUpsert"),
             Path(_p("permissions/group/member/delete"), self.permissions_group_member_delete, "PermissionsMemberDelete"),
             Path(_p("permissions/group/auth"), self.permissions_group_auth, "PermissionsGroupAuth"),
+            Path(_p("permissions/groups/mine"), self.permissions_groups_mine, "PermissionsGroupsMine"),
+            Path(_p("master/users/list"), self.master_users_list, "MasterUsersList"),
+            Path(_p("master/users/deactivate"), self.master_users_deactivate, "MasterUsersDeactivate"),
         )
 
         self.logger = AuthLogger(log_path)
@@ -375,14 +399,14 @@ class AuthService:
         data = request.json() or {}
         token = str(data.get("token") or "")
         group_id = str(data.get("group_id") or "").strip()
-        pid = str(data.get("pid") or "").strip()
+        user_id = str(data.get("user_id") or "").strip()
         level_raw = data.get("level")
         if not token:
             raise AuthTokenMissingError()
         if not group_id:
             raise AuthMissingFieldError("group_id")
-        if not pid:
-            raise AuthMissingFieldError("pid")
+        if not user_id:
+            raise AuthMissingFieldError("user_id")
         if not isinstance(level_raw, int):
             raise AuthMissingFieldError("level")
 
@@ -390,7 +414,7 @@ class AuthService:
         if not lsess:
             raise AuthTokenInvalidError()
         self.dbm.assert_permission_group_owner(group_id=group_id, owner_uid=lsess.uid)
-        self.dbm.upsert_permission_member_by_pid(group_id=group_id, pid=pid, level=level_raw)
+        self.dbm.upsert_permission_member_by_user_id(group_id=group_id, user_id=user_id, level=level_raw)
         return JsonResponse({"ok": True})
 
     def permissions_group_member_delete(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
@@ -401,19 +425,19 @@ class AuthService:
         data = request.json() or {}
         token = str(data.get("token") or "")
         group_id = str(data.get("group_id") or "").strip()
-        pid = str(data.get("pid") or "").strip()
+        user_id = str(data.get("user_id") or "").strip()
         if not token:
             raise AuthTokenMissingError()
         if not group_id:
             raise AuthMissingFieldError("group_id")
-        if not pid:
-            raise AuthMissingFieldError("pid")
+        if not user_id:
+            raise AuthMissingFieldError("user_id")
 
         lsess = self.dbm.verify(token)
         if not lsess:
             raise AuthTokenInvalidError()
         self.dbm.assert_permission_group_owner(group_id=group_id, owner_uid=lsess.uid)
-        self.dbm.delete_permission_member_by_pid(group_id=group_id, pid=pid)
+        self.dbm.delete_permission_member_by_user_id(group_id=group_id, user_id=user_id)
         return JsonResponse({"ok": True})
 
     def permissions_group_auth(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
@@ -439,6 +463,57 @@ class AuthService:
         level = self.dbm.auth_permission_level_by_pid(group_id=group_id, pid=pid)
         return JsonResponse({"ok": True, "group_id": group_id, "pid": pid, "level": level})
 
+    def permissions_groups_mine(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        if not token:
+            raise AuthTokenMissingError()
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+        groups = self.dbm.permission_groups_by_uid(lsess.uid)
+        return JsonResponse({"ok": True, "groups": groups})
+
+    def master_users_list(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        if not token:
+            raise AuthTokenMissingError()
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+        if lsess.user_id != self.master_user:
+            raise AuthInvalidCredentialsError()
+        return JsonResponse({"ok": True, "users": self.dbm.list_users()})
+
+    def master_users_deactivate(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+        data = request.json() or {}
+        token = str(data.get("token") or "")
+        target_user_id = str(data.get("target_user_id") or "").strip()
+        master_password = str(data.get("master_password") or "")
+        if not token:
+            raise AuthTokenMissingError()
+        if not target_user_id:
+            raise AuthMissingFieldError("target_user_id")
+        if not master_password:
+            raise AuthMissingFieldError("master_password")
+
+        lsess = self.dbm.verify(token)
+        if not lsess:
+            raise AuthTokenInvalidError()
+        if lsess.user_id != self.master_user:
+            raise AuthInvalidCredentialsError()
+        if master_password != self.master_password:
+            raise AuthInvalidCredentialsError()
+        self.dbm.deactivate_user(target_user_id)
+        return JsonResponse({"ok": True})
+
 
 # --------------------
 # AuthClient (App側)
@@ -463,6 +538,9 @@ class AuthClient:
         self.permissions_group_member_upsert_url = base + "/permissions/group/member/upsert"
         self.permissions_group_member_delete_url = base + "/permissions/group/member/delete"
         self.permissions_group_auth_url = base + "/permissions/group/auth"
+        self.permissions_groups_mine_url = base + "/permissions/groups/mine"
+        self.master_users_list_url = base + "/master/users/list"
+        self.master_users_deactivate_url = base + "/master/users/deactivate"
         self.timeout = timeout
 
     def _post(self, url: str, body: dict) -> dict:
@@ -570,6 +648,28 @@ class AuthClient:
         """Return a group-scoped permissions helper."""
         return Permissions(self, group_id, token)
 
+    def master_users_list(self, *, token: str) -> list[dict]:
+        d = self._post(self.master_users_list_url, {"token": token})
+        if not d.get("ok"):
+            self._raise_from_error_code(str(d.get("error") or ""))
+        users = d.get("users")
+        if isinstance(users, list):
+            return users
+        return []
+
+    def master_users_deactivate(self, *, token: str, target_user_id: str, master_password: str) -> None:
+        d = self._post(
+            self.master_users_deactivate_url,
+            {
+                "token": token,
+                "target_user_id": target_user_id,
+                "master_password": master_password,
+            },
+        )
+        if d.get("ok"):
+            return
+        self._raise_from_error_code(str(d.get("error") or ""))
+
     def _raise_from_error_code(self, code: str) -> None:
         if code == "A01":
             raise AuthMissingFieldError("unknown")
@@ -617,7 +717,8 @@ class AuthDBM(DatabaseManager):
                         password_hash TEXT NOT NULL,
                         password_salt TEXT NOT NULL,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        is_active INTEGER NOT NULL DEFAULT 1
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        is_master INTEGER NOT NULL DEFAULT 0
                     );
                     """,
                     (),
@@ -675,7 +776,7 @@ class AuthDBM(DatabaseManager):
 
         try:
             self.execute(
-                "INSERT INTO users VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO users VALUES(?,?,?,?,?,?,?,?)",
                 uid,
                 user_id,
                 public_name,
@@ -683,6 +784,7 @@ class AuthDBM(DatabaseManager):
                 salt,
                 None,
                 1,
+                0,
             )
         except DBIntegrityError:
             raise AuthUserIdAlreadyExistsError()
@@ -759,6 +861,25 @@ class AuthDBM(DatabaseManager):
             return None
 
         return LocalSession(str(sid), str(uid), str(user_id), str(public_name), str(token), int(exp), None, ua)
+
+    def ensure_master_user(self, *, user_id: str, login_password: str) -> None:
+        """Create master user if missing."""
+        rows = self.execute("SELECT uid FROM users WHERE user_id=?", user_id)
+        if rows:
+            return
+        salt = _make_salt()
+        uid = _rand()
+        self.execute(
+            "INSERT INTO users VALUES(?,?,?,?,?,?,?,?)",
+            uid,
+            user_id,
+            "Master User",
+            _hash_password(login_password, salt),
+            salt,
+            None,
+            1,
+            1,
+        )
 
     def update_public_name(self, *, uid: str, public_name: str) -> None:
         """Update the user's public_name."""
@@ -856,9 +977,49 @@ class AuthDBM(DatabaseManager):
             level,
         )
 
+    def get_uid_by_user_id(self, user_id: str) -> str | None:
+        """Resolve uid from user_id."""
+        if not user_id:
+            return None
+        rows = self.execute("SELECT uid FROM users WHERE user_id=?", user_id)
+        if not rows:
+            return None
+        return str(rows[0][0])
+
+    def upsert_permission_member_by_user_id(self, *, group_id: str, user_id: str, level: int) -> None:
+        """Upsert member level by user_id."""
+        if level < 0:
+            raise AuthMissingFieldError("level")
+        uid = self.get_uid_by_user_id(user_id)
+        if uid is None:
+            raise AuthInvalidCredentialsError()
+        self.execute(
+            """
+            INSERT INTO permission_group_members(group_id, uid, level, updated_at)
+            VALUES(?,?,?,CURRENT_TIMESTAMP)
+            ON CONFLICT(group_id, uid) DO UPDATE SET
+                level=excluded.level,
+                updated_at=CURRENT_TIMESTAMP
+            """,
+            group_id,
+            uid,
+            level,
+        )
+
     def delete_permission_member_by_pid(self, *, group_id: str, pid: str) -> None:
         """Delete a member by pid from a group."""
         uid = self.get_uid_by_pid(pid)
+        if uid is None:
+            return
+        self.execute(
+            "DELETE FROM permission_group_members WHERE group_id=? AND uid=?",
+            group_id,
+            uid,
+        )
+
+    def delete_permission_member_by_user_id(self, *, group_id: str, user_id: str) -> None:
+        """Delete member by user_id from a group."""
+        uid = self.get_uid_by_user_id(user_id)
         if uid is None:
             return
         self.execute(
@@ -880,3 +1041,55 @@ class AuthDBM(DatabaseManager):
         if not rows:
             return 0
         return int(rows[0][0])
+
+    def permission_groups_by_uid(self, uid: str) -> list[dict]:
+        """List groups and levels for uid."""
+        rows = self.execute(
+            """
+            SELECT g.group_id, g.name, m.level
+            FROM permission_group_members m
+            JOIN permission_groups g ON g.group_id=m.group_id
+            WHERE m.uid=?
+            ORDER BY g.group_id
+            """,
+            uid,
+        ) or []
+        out: list[dict] = []
+        for group_id, name, level in rows:
+            out.append({"group_id": str(group_id), "name": str(name), "level": int(level)})
+        return out
+
+    def list_users(self) -> list[dict]:
+        """List all users."""
+        rows = self.execute(
+            """
+            SELECT uid, user_id, public_name, is_active, is_master, created_at
+            FROM users
+            ORDER BY user_id
+            """
+        ) or []
+        out: list[dict] = []
+        for uid, user_id, public_name, is_active, is_master, created_at in rows:
+            out.append(
+                {
+                    "pid": str(uid),
+                    "user_id": str(user_id),
+                    "public_name": str(public_name),
+                    "is_active": int(is_active),
+                    "is_master": int(is_master),
+                    "created_at": str(created_at),
+                }
+            )
+        return out
+
+    def deactivate_user(self, user_id: str) -> None:
+        """Logical delete user and revoke sessions."""
+        uid = self.get_uid_by_user_id(user_id)
+        if uid is None:
+            raise AuthInvalidCredentialsError()
+        self.execute("UPDATE users SET is_active=0 WHERE uid=?", uid)
+        self.execute(
+            "UPDATE sessions SET revoked_at=? WHERE uid=? AND revoked_at IS NULL",
+            _now(),
+            uid,
+        )

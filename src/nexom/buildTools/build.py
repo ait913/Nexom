@@ -7,6 +7,7 @@ from importlib import import_module, resources
 from pathlib import Path
 import re
 import shutil
+import secrets
 
 
 @dataclass(frozen=True)
@@ -203,9 +204,13 @@ def create_auth(
     project_dir: str | Path,
     *,
     options: AppBuildOptions | None = None,
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
 ) -> Path:
     """Create a new Nexom auth app scaffold."""
     options = options or AppBuildOptions(port=7070)
+    if master_user_login_password is None:
+        master_user_login_password = secrets.token_urlsafe(14)
 
     project_root = Path(project_dir).expanduser().resolve()
     project_root.mkdir(parents=True, exist_ok=True)
@@ -233,6 +238,8 @@ def create_auth(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__master_user__": str(master_user),
+            "__master_user_login_password__": str(master_user_login_password),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -251,6 +258,8 @@ def create_config(
     *,
     options: AppBuildOptions | None = None,
     auth: bool = False,
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
 ) -> Path:
     """
     Create only config.py for an existing app directory.
@@ -273,6 +282,8 @@ def create_config(
 
     if auth:
         pkg = "nexom.assets.auth"
+        if master_user_login_password is None:
+            master_user_login_password = secrets.token_urlsafe(14)
         (project_root / "data" / "db" / "auth").mkdir(parents=True, exist_ok=True)
         (project_root / "data" / "log" / app_name).mkdir(parents=True, exist_ok=True)
         app_name_for_template = "auth"
@@ -291,6 +302,8 @@ def create_config(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__master_user__": str(master_user),
+            "__master_user_login_password__": str(master_user_login_password or ""),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -306,6 +319,8 @@ def start_project(
     auth_options: AppBuildOptions | None = None,
     gateway: str = "none",  # none|nginx|apache
     domain: str = "",
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
 ) -> Path:
     """
     Assumption: user already created the project directory and cd'ed into it.
@@ -330,6 +345,8 @@ def start_project(
     # main app + auth app
     main_opt = main_options or AppBuildOptions()
     auth_opt = auth_options or AppBuildOptions(port=7070)
+    if master_user_login_password is None:
+        master_user_login_password = secrets.token_urlsafe(14)
 
     # auth is usually fixed folder name "auth", but you asked folder name selectable.
     # create_auth creates "auth" fixed, so we generate via create_app then remove extras?
@@ -363,6 +380,8 @@ def start_project(
             "__g_port__": str(auth_opt.port),
             "__g_workers__": str(auth_opt.workers),
             "__g_reload__": "True" if auth_opt.reload else "False",
+            "__master_user__": str(master_user),
+            "__master_user_login_password__": str(master_user_login_password),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")

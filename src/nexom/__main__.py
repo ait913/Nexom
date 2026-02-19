@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 from pathlib import Path
 
@@ -105,6 +106,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "start-project":
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14)
         main_opt = AppBuildOptions(
             address=args.address,
             port=args.port,
@@ -125,8 +128,12 @@ def main(argv: list[str] | None = None) -> None:
             auth_options=auth_opt,
             gateway=args.gateway,
             domain=args.domain,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password,
         )
         print(f"Initialized Nexom project at: {out}")
+        print(f"[auth] MASTER_USER={master_user}")
+        print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
         return
 
     if args.command == "create-app":
@@ -147,18 +154,29 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "create-auth":
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14)
         options = AppBuildOptions(
             address=args.address,
             port=args.port,
             workers=args.workers,
             reload=args.reload,
         )
-        out_dir = create_auth(Path(args.out), options=options)
+        out_dir = create_auth(
+            Path(args.out),
+            options=options,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password,
+        )
         print(f"Created Nexom auth app project at: {out_dir}")
+        print(f"[auth] MASTER_USER={master_user}")
+        print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
         return
 
     if args.command == "create-config":
         default_port = 7070 if args.auth else 8080
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14) if args.auth else ""
         options = AppBuildOptions(
             address=args.address,
             port=(default_port if args.port is None else args.port),
@@ -170,8 +188,13 @@ def main(argv: list[str] | None = None) -> None:
             args.app_name,
             options=options,
             auth=bool(args.auth),
+            master_user=master_user,
+            master_user_login_password=master_user_login_password or None,
         )
         print(f"Created config at: {out_file}")
+        if args.auth:
+            print(f"[auth] MASTER_USER={master_user}")
+            print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
         return
 
 
