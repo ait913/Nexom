@@ -19,7 +19,6 @@ from auth.config import (
     ACES_LOG,
     AUTH_LOG,
     MASTER_USER,
-    MASTER_USER_LOGIN_PASSWORD,
     MASTER_PASSWORD,
 )
 
@@ -37,7 +36,7 @@ service = AuthService(
     AUTH_DB,
     AUTH_LOG,
     master_user=MASTER_USER,
-    master_login_password=MASTER_USER_LOGIN_PASSWORD,
+    master_login_password="",
     master_password=MASTER_PASSWORD,
 )
 

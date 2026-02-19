@@ -39,7 +39,7 @@ def test_buildtools_create_app_and_auth(tmp_path: Path):
     cfg = (auth_root / "config.py").read_text(encoding="utf-8")
     assert 'AUTH_DB: str = DATA_DIR + "/db/auth/auth.db"' in cfg
     assert "MASTER_USER: str =" in cfg
-    assert "MASTER_USER_LOGIN_PASSWORD: str =" in cfg
+    assert "MASTER_USER_LOGIN_PASSWORD: str =" not in cfg
     assert 'MASTER_PASSWORD: str = "NexomWebFramework"' in cfg
 
 

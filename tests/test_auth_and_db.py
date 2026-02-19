@@ -15,7 +15,7 @@ def _json_response(res) -> dict:
 def test_auth_service_signup_login_verify(tmp_path):
     db_path = tmp_path / "auth.db"
     log_path = tmp_path / "auth.log"
-    svc = AuthService(str(db_path), str(log_path))
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
 
     # signup
     body = json.dumps({"user_id": "u1", "public_name": "User", "password": "pw"}).encode("utf-8")
@@ -56,7 +56,7 @@ def test_auth_dbm_basic(tmp_path):
 def test_auth_service_update_public_name(tmp_path):
     db_path = tmp_path / "auth.db"
     log_path = tmp_path / "auth.log"
-    svc = AuthService(str(db_path), str(log_path))
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
 
     body = json.dumps({"user_id": "u3", "public_name": "User3", "password": "pw3"}).encode("utf-8")
     res = svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
@@ -83,7 +83,7 @@ def test_auth_service_update_public_name(tmp_path):
 def test_auth_service_update_password_revokes_sessions(tmp_path):
     db_path = tmp_path / "auth.db"
     log_path = tmp_path / "auth.log"
-    svc = AuthService(str(db_path), str(log_path))
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
 
     body = json.dumps({"user_id": "u4", "public_name": "User4", "password": "pw4"}).encode("utf-8")
     res = svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
@@ -121,7 +121,7 @@ def test_auth_service_update_password_revokes_sessions(tmp_path):
 def test_permissions_group_flow(tmp_path):
     db_path = tmp_path / "auth.db"
     log_path = tmp_path / "auth.log"
-    svc = AuthService(str(db_path), str(log_path))
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
 
     # owner signup/login
     body = json.dumps({"user_id": "owner", "public_name": "Owner", "password": "pw"}).encode("utf-8")

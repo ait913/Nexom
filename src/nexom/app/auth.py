@@ -181,7 +181,7 @@ class AuthService:
         self.master_password = master_password
         self.dbm.ensure_master_user(
             user_id=master_user,
-            login_password=(master_login_password or _rand(18)),
+            login_password=master_login_password,
         )
 
         p = prefix.strip("/")
@@ -867,6 +867,8 @@ class AuthDBM(DatabaseManager):
         rows = self.execute("SELECT uid FROM users WHERE user_id=?", user_id)
         if rows:
             return
+        if not login_password:
+            raise AuthServiceUnavailableError()
         salt = _make_salt()
         uid = _rand()
         self.execute(

@@ -26,6 +26,25 @@ class AppBuildError(RuntimeError):
     """Raised when project generation fails for any reason."""
 
 
+def _bootstrap_auth_master(
+    *,
+    project_root: Path,
+    master_user: str,
+    master_user_login_password: str,
+) -> None:
+    from nexom.app.auth import AuthDBM
+
+    db_path = project_root / "data" / "db" / "auth" / "auth.db"
+    dbm = AuthDBM(str(db_path))
+    try:
+        dbm.ensure_master_user(
+            user_id=master_user,
+            login_password=master_user_login_password,
+        )
+    finally:
+        dbm.rip_connection()
+
+
 def _copy_from_package(pkg: str, filename: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     module = import_module(pkg)
@@ -239,7 +258,6 @@ def create_auth(
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
             "__master_user__": str(master_user),
-            "__master_user_login_password__": str(master_user_login_password),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -248,6 +266,12 @@ def create_auth(
     gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": "auth"})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    _bootstrap_auth_master(
+        project_root=project_root,
+        master_user=master_user,
+        master_user_login_password=master_user_login_password,
+    )
 
     return app_root
 
@@ -303,10 +327,17 @@ def create_config(
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
             "__master_user__": str(master_user),
-            "__master_user_login_password__": str(master_user_login_password or ""),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
+
+    if auth:
+        _bootstrap_auth_master(
+            project_root=project_root,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password or "",
+        )
+
     return config_path
 
 
@@ -381,7 +412,6 @@ def start_project(
             "__g_workers__": str(auth_opt.workers),
             "__g_reload__": "True" if auth_opt.reload else "False",
             "__master_user__": str(master_user),
-            "__master_user_login_password__": str(master_user_login_password),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -391,6 +421,12 @@ def start_project(
     gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": auth_name})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    _bootstrap_auth_master(
+        project_root=root,
+        master_user=master_user,
+        master_user_login_password=master_user_login_password,
+    )
 
     # gateway/
     if gateway != "none":

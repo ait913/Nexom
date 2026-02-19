@@ -16,7 +16,6 @@ RELOAD: bool = __g_reload__
 # ======== auth service ========
 AUTH_DB: str = DATA_DIR + "/db/auth/auth.db"
 MASTER_USER: str = "__master_user__"
-MASTER_USER_LOGIN_PASSWORD: str = "__master_user_login_password__"
 MASTER_PASSWORD: str = "NexomWebFramework"
 
 # ======== logger ========
