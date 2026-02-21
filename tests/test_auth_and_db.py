@@ -142,12 +142,19 @@ def test_permissions_group_flow(tmp_path):
     member_pid = member_data["pid"]
     member_user_id = member_data["user_id"]
 
-    # create group
+    # create group (owner gets level=100 automatically)
     body = json.dumps({"token": owner_token, "group_id": "g1", "name": "Group1"}).encode("utf-8")
     res = svc.handler(
         make_environ(method="POST", path="/permissions/group/create", body=body, content_type="application/json")
     )
     assert res.status_code == 200
+
+    # owner has level 100 by default
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": owner_pid}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
+    )
+    assert _json_response(res)["level"] == 100
 
     # upsert member level
     body = json.dumps({"token": owner_token, "group_id": "g1", "user_id": member_user_id, "level": 7}).encode("utf-8")
@@ -168,12 +175,24 @@ def test_permissions_group_flow(tmp_path):
     )
     assert _json_response(res)["level"] == 7
 
-    # missing member -> level 0
+    # owner has level 100
     body = json.dumps({"token": owner_token, "group_id": "g1", "pid": owner_pid}).encode("utf-8")
     res = svc.handler(
         make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
     )
-    assert _json_response(res)["level"] == 0
+    assert _json_response(res)["level"] == 100
+
+    # level > 100 should fail
+    body = json.dumps({"token": owner_token, "group_id": "g1", "user_id": member_user_id, "level": 101}).encode("utf-8")
+    res = svc.handler(
+        make_environ(
+            method="POST",
+            path="/permissions/group/member/upsert",
+            body=body,
+            content_type="application/json",
+        )
+    )
+    assert res.status_code == 400
 
     # groups mine
     body = json.dumps({"token": member_data["token"]}).encode("utf-8")
@@ -195,6 +214,28 @@ def test_permissions_group_flow(tmp_path):
     )
     assert res.status_code == 200
 
+    body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
+    )
+    assert _json_response(res)["level"] == 0
+
+    # non-100 user cannot delete group
+    body = json.dumps({"token": member_data["token"], "group_id": "g1"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/delete", body=body, content_type="application/json")
+    )
+    assert res.status_code == 401
+
+    # owner(100) can delete group
+    body = json.dumps({"token": owner_token, "group_id": "g1"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/delete", body=body, content_type="application/json")
+    )
+    assert res.status_code == 200
+    assert _json_response(res)["ok"] is True
+
+    # group is gone
     body = json.dumps({"token": owner_token, "group_id": "g1", "pid": member_pid}).encode("utf-8")
     res = svc.handler(
         make_environ(method="POST", path="/permissions/group/auth", body=body, content_type="application/json")
@@ -244,3 +285,59 @@ def test_master_users_list_and_deactivate(tmp_path):
     body = json.dumps({"user_id": "u5", "password": "pw5"}).encode("utf-8")
     res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
     assert res.status_code == 403
+
+
+def test_auth_service_convert_user_id_and_pid(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
+
+    body = json.dumps({"user_id": "u6", "public_name": "User6", "password": "pw6"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    assert res.status_code == 201
+
+    body = json.dumps({"user_id": "u6", "password": "pw6"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    login_data = _json_response(res)
+    token = login_data["token"]
+    pid = login_data["pid"]
+
+    body = json.dumps({"token": token, "pid": pid}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/convert/user-id", body=body, content_type="application/json"))
+    data = _json_response(res)
+    assert res.status_code == 200
+    assert data["ok"] is True
+    assert data["user_id"] == "u6"
+
+    body = json.dumps({"token": token, "user_id": "u6"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/convert/pid", body=body, content_type="application/json"))
+    data = _json_response(res)
+    assert res.status_code == 200
+    assert data["ok"] is True
+    assert data["pid"] == pid
+
+
+def test_permission_group_duplicate_returns_permission_error(tmp_path):
+    db_path = tmp_path / "auth.db"
+    log_path = tmp_path / "auth.log"
+    svc = AuthService(str(db_path), str(log_path), master_login_password="master_login_pw")
+
+    body = json.dumps({"user_id": "owner2", "public_name": "Owner2", "password": "pw"}).encode("utf-8")
+    svc.handler(make_environ(method="POST", path="/signup", body=body, content_type="application/json"))
+    body = json.dumps({"user_id": "owner2", "password": "pw"}).encode("utf-8")
+    owner_login = svc.handler(make_environ(method="POST", path="/login", body=body, content_type="application/json"))
+    owner_token = _json_response(owner_login)["token"]
+
+    body = json.dumps({"token": owner_token, "group_id": "dup_g", "name": "Group"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/create", body=body, content_type="application/json")
+    )
+    assert res.status_code == 200
+
+    body = json.dumps({"token": owner_token, "group_id": "dup_g", "name": "Group2"}).encode("utf-8")
+    res = svc.handler(
+        make_environ(method="POST", path="/permissions/group/create", body=body, content_type="application/json")
+    )
+    data = _json_response(res)
+    assert res.status_code == 409
+    assert data["error"] == "A10"
