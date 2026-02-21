@@ -204,6 +204,7 @@ class AuthService:
             Path(_p("login"), self.login, "AuthLogin"),
             Path(_p("logout"), self.logout, "AuthLogout"),
             Path(_p("verify"), self.verify, "AuthVerify"),
+            Path(_p("resolve/pid"), self.resolve_pid, "AuthResolvePid"),
             Path(_p("convert/pid"), self.convert_pid, "AuthConvertPid"),
             Path(_p("convert/user-id"), self.convert_user_id, "AuthConvertUserId"),
             Path(_p("update/public-name"), self.update_public_name, "AuthUpdatePublicName"),
@@ -374,6 +375,25 @@ class AuthService:
         lsess = self.dbm.verify(token)
         if not lsess:
             raise AuthTokenInvalidError()
+
+        pid = self.dbm.get_uid_by_user_id(user_id)
+        if not pid:
+            raise AuthInvalidCredentialsError()
+        return JsonResponse({"ok": True, "user_id": user_id, "pid": pid})
+
+    def resolve_pid(self, request: Request, args: dict[str, Optional[str]]) -> JsonResponse:
+        """
+        Resolve user_id to pid without token.
+
+        Expected JSON: {user_id}
+        """
+        if request.method != "POST":
+            return JsonResponse({"ok": False, "error": "MethodNotAllowed"}, status=405)
+
+        data = request.json() or {}
+        user_id = str(data.get("user_id") or "").strip()
+        if not user_id:
+            raise AuthMissingFieldError("user_id")
 
         pid = self.dbm.get_uid_by_user_id(user_id)
         if not pid:
@@ -619,6 +639,7 @@ class AuthClient:
         self.login_url = base + "/login"
         self.logout_url = base + "/logout"
         self.verify_url = base + "/verify"
+        self.resolve_pid_url = base + "/resolve/pid"
         self.convert_pid_url = base + "/convert/pid"
         self.convert_user_id_url = base + "/convert/user-id"
         self.update_public_name_url = base + "/update/public-name"
@@ -727,6 +748,13 @@ class AuthClient:
     def convert_pid(self, *, token: str, user_id: str) -> str:
         """Convert user_id to pid."""
         d = self._post(self.convert_pid_url, {"token": token, "user_id": user_id})
+        if not d.get("ok"):
+            self._raise_from_error_code(str(d.get("error") or ""))
+        return str(d.get("pid") or "")
+
+    def resolve_pid(self, *, user_id: str) -> str:
+        """Resolve user_id to pid without token."""
+        d = self._post(self.resolve_pid_url, {"user_id": user_id})
         if not d.get("ok"):
             self._raise_from_error_code(str(d.get("error") or ""))
         return str(d.get("pid") or "")

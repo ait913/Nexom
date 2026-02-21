@@ -316,6 +316,14 @@ def test_auth_service_convert_user_id_and_pid(tmp_path):
     assert data["ok"] is True
     assert data["pid"] == pid
 
+    # token-less resolve user_id -> pid
+    body = json.dumps({"user_id": "u6"}).encode("utf-8")
+    res = svc.handler(make_environ(method="POST", path="/resolve/pid", body=body, content_type="application/json"))
+    data = _json_response(res)
+    assert res.status_code == 200
+    assert data["ok"] is True
+    assert data["pid"] == pid
+
 
 def test_permission_group_duplicate_returns_permission_error(tmp_path):
     db_path = tmp_path / "auth.db"
