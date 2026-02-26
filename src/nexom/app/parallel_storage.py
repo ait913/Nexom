@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import shutil
 import hashlib
 import secrets
+import mimetypes
 
 from json.decoder import JSONDecodeError
 import json
@@ -34,6 +35,46 @@ def _sha256_hex_file(path: Path) -> str:
             h.update(b)
     return h.hexdigest()
 
+def _detect_file_type(path: Path, filename: str) -> FileTypes:
+    """
+    Detect a FileTypes value from content and filename.
+
+    Priority:
+    - image content -> Images
+    - media mime (audio/video) -> Media
+    - document mime (text/application) -> Documents
+    - dangerous extensions -> Dangerous
+    - fallback -> Binary
+    """
+    # content-based image detection (Pillow)
+    try:
+        from PIL import Image  # type: ignore
+        with Image.open(str(path)) as im:
+            im.verify()
+        return "Images"
+    except Exception:
+        pass
+
+    # extension/mime-based detection
+    mime, _ = mimetypes.guess_type(filename)
+    if mime:
+        if mime.startswith("image/"):
+            return "Images"
+        if mime.startswith("audio/") or mime.startswith("video/"):
+            return "Media"
+        if mime.startswith("text/") or mime == "application/pdf":
+            return "Documents"
+
+    # dangerous extensions (very rough)
+    dangerous_exts = {
+        ".exe", ".dll", ".bat", ".cmd", ".ps1", ".sh", ".msi",
+        ".app", ".dylib", ".so", ".jar",
+    }
+    if Path(filename).suffix.lower() in dangerous_exts:
+        return "Dangerous"
+
+    return "Binary"
+
 
 def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
     """
@@ -49,79 +90,6 @@ def format_psc_filename(contents_id: str, suffix: str, **kwargs) -> str:
     else:
         tail = "__PSC_"
     return f"{contents_id}{tail}{suffix}"
-
-
-class ParallelStorage:
-    """
-    Convenience wrapper around ParallelStorageDBM for public APIs.
-
-    Provides PSC path formatting, status updates, and image compression helpers.
-    """
-    def __init__(self, db_file:str, contents_dir: str) -> None:
-        self.contents_dir = Path(contents_dir)
-        
-        self._PSDBM = ParallelStorageDBM(db_file)
-        
-    def format_psc_public_id(self, public_id: str, **kwargs) -> Path:
-        """
-        Return the resolved PSC file path for a public_id.
-
-        kwargs are embedded in the PSC filename format.
-        """
-        fMeta = self._PSDBM.getMeta(public_id=public_id)
-        contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, fMeta.suffix, **kwargs)
-        return contents_actual_path.resolve()
-    
-    def comp_img(self, public_id: str, width: int, height: int, quality: int) -> Path:
-        """
-        Generate a WebP image variant and return its path.
-
-        The source must be an image, and output is saved under contents_dir.
-        """
-        fMeta = self._PSDBM.getMeta(public_id=public_id)
-        if not fMeta.isTypes("Images"):
-            raise PsFileTypesError()
-        
-        if width <= 0 or height <= 0:
-            raise PsArgmentsError()
-        if quality < 1 or quality > 100:
-            raise PsArgmentsError()
-        
-        original_path = self.format_psc_public_id(public_id)
-        cache_path = (self.contents_dir / format_psc_filename(
-            fMeta.contents_id, ".webp", width=width, height=height, quality=quality
-        )).resolve()
-        
-        # originalの画像を指定の値で圧縮し、cache_pathへ保存、返り値はcache_path
-        try:
-            from PIL import Image  # type: ignore
-        except Exception as e:
-            raise ModuleNotFoundError(
-                "Pillow is required for image compression. Install with: pip install Pillow"
-            ) from e
-        
-        self.contents_dir.mkdir(parents=True, exist_ok=True)
-        
-        with Image.open(str(original_path)) as im:
-            im = im.convert("RGB")
-            if im.size != (width, height):
-                im = im.resize((width, height), Image.LANCZOS)
-            im.save(str(cache_path), format="WEBP", quality=quality, method=6)
-        
-        return cache_path
-    
-    def update_suffix(self, public_id: str, suffix: str) -> None:
-        """Update stored file suffix for a public_id."""
-        if not suffix.startswith("."):
-            raise PsArgmentsError("suffix")
-        fMeta = self._PSDBM.getMeta(public_id=public_id)
-        self._PSDBM.update_suffix(fMeta.contents_id, suffix)
-        
-    def update_status(self, public_id: str, status: FileStatus) -> None:
-        """Update stored status for a public_id."""
-        _FileStatusTypesCheck(status)
-        fMeta = self._PSDBM.getMeta(public_id=public_id)
-        self._PSDBM.status_change(fMeta.contents_id, status)
 
 
 @dataclass(frozen=True)
@@ -144,6 +112,137 @@ class FileMeta:
         if types not in ("Documents", "Images", "Binary", "Media", "Dangerous"):
             raise PsFileTypesError()
         return types == self.types
+
+
+class ParallelStorage:
+    """
+    Convenience wrapper around ParallelStorageDBM for public APIs.
+
+    Provides PSC path formatting, status updates, and image compression helpers.
+    """
+    def __init__(self, db_file:str, contents_dir: str, working_dir: str | None = None) -> None:
+        self.contents_dir = Path(contents_dir)
+        self.working_dir = Path(working_dir) if working_dir else None
+        
+        self._PSDBM = ParallelStorageDBM(db_file)
+        
+    def format_psc_public_id(self, public_id: str, **kwargs) -> Path:
+        """
+        Return the resolved PSC file path for a public_id.
+
+        kwargs are embedded in the PSC filename format.
+        """
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        
+        #各キャッシュファイルの拡張子へ変換
+        suffix = fMeta.suffix
+        
+        #画像圧縮していた場合
+        if fMeta.types == "Images":
+            if "width" in kwargs or "height" in kwargs or "quality" in kwargs:
+                suffix = ".webp"
+        
+        contents_actual_path = self.contents_dir / format_psc_filename(fMeta.contents_id, suffix, **kwargs)
+        return contents_actual_path.resolve()
+    
+    def comp_img(self, public_id: str, width: int | None, height: int | None, quality: int | None) -> Path:
+        """
+        Generate a WebP image variant and return its path.
+
+        The source must be an image, and output is saved under contents_dir.
+        """
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        if not fMeta.isTypes("Images"):
+            raise PsFileTypesError()
+
+        if width is not None and width <= 0:
+            raise PsArgmentsError("width")
+        if height is not None and height <= 0:
+            raise PsArgmentsError("height")
+        if quality is not None and (quality < 1 or quality > 100):
+            raise PsArgmentsError("quality")
+
+        q = 70 if quality is None else quality
+
+        original_path = self.format_psc_public_id(public_id)
+        # cache name uses user-provided quality only (omit if None)
+        cache_path = self.format_psc_public_id(public_id, width=width, height=height, quality=quality)
+        
+        # originalの画像を指定の値で圧縮し、cache_pathへ保存、返り値はcache_path
+        try:
+            from PIL import Image  # type: ignore
+        except Exception as e:
+            raise ModuleNotFoundError(
+                "Pillow is required for image compression. Install with: pip install Pillow"
+            ) from e
+        
+        self.contents_dir.mkdir(parents=True, exist_ok=True)
+        
+        with Image.open(str(original_path)) as im:
+            im = im.convert("RGB")
+
+            if width is None and height is None:
+                target_w, target_h = im.size
+            elif width is None:
+                target_h = height
+                target_w = round(im.size[0] * (target_h / im.size[1]))
+            elif height is None:
+                target_w = width
+                target_h = round(im.size[1] * (target_w / im.size[0]))
+            else:
+                target_w, target_h = width, height
+
+            if im.size != (target_w, target_h):
+                im = im.resize((target_w, target_h), Image.LANCZOS)
+            im.save(str(cache_path), format="WEBP", quality=q, method=6)
+        
+        return cache_path
+    
+    def update_suffix(self, public_id: str, suffix: str) -> None:
+        """Update stored file suffix for a public_id."""
+        if not suffix.startswith("."):
+            raise PsArgmentsError("suffix")
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        self._PSDBM.update_suffix(fMeta.contents_id, suffix)
+        
+    def update_status(self, public_id: str, status: FileStatus) -> None:
+        """Update stored status for a public_id."""
+        _FileStatusTypesCheck(status)
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+        self._PSDBM.status_change(fMeta.contents_id, status)
+        
+    def getMeta(self, public_id: str) -> FileMeta:
+        """Get FileMeta"""
+        return self._PSDBM.getMeta(public_id=public_id)
+    
+    def delete(self, pid: str, public_id: str, *, force: bool = False) -> None:
+        """
+        Delete a content record and related files.
+
+        Targets:
+        - DB record in parallel_storage
+        - content files in contents_dir matching "<contents_id>__PSC_*"
+        - worker directory "<working_dir>/<public_id>" when working_dir is configured
+        """
+        fMeta = self._PSDBM.getMeta(public_id=public_id)
+
+        if (not force) and (fMeta.pid != pid):
+            raise PsPermissionError()
+
+        # Remove content and cache files first, then DB record.
+        self.contents_dir.mkdir(parents=True, exist_ok=True)
+        for path in self.contents_dir.glob(f"{fMeta.contents_id}__PSC_*"):
+            if path.is_dir():
+                shutil.rmtree(str(path), ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+
+        if self.working_dir:
+            worker = self.working_dir / public_id
+            shutil.rmtree(str(worker), ignore_errors=True)
+
+        self._PSDBM.remove(pid if not force else None, public_id=public_id)
+
 
 class ParallelStorageDBM(DatabaseManager):
     """Database manager for the parallel_storage table."""
@@ -440,6 +539,10 @@ class MultiPartUploader:
         # サイズも最低限チェック
         if comp_file.stat().st_size != fMeta.size:
             raise PsDataCorruotedError()
+
+        # update file type based on content
+        detected = _detect_file_type(comp_file, fMeta.filename + fMeta.suffix)
+        self._PSDBM.update_types(fMeta.contents_id, detected)
 
         # move completed file into contents storage
         self.contents_root.mkdir(parents=True, exist_ok=True)

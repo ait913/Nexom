@@ -7,6 +7,7 @@ from importlib import import_module, resources
 from pathlib import Path
 import re
 import shutil
+import secrets
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,25 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 class AppBuildError(RuntimeError):
     """Raised when project generation fails for any reason."""
+
+
+def _bootstrap_auth_master(
+    *,
+    project_root: Path,
+    master_user: str,
+    master_user_login_password: str,
+) -> None:
+    from nexom.app.auth import AuthDBM
+
+    db_path = project_root / "data" / "db" / "auth" / "auth.db"
+    dbm = AuthDBM(str(db_path))
+    try:
+        dbm.ensure_master_user(
+            user_id=master_user,
+            login_password=master_user_login_password,
+        )
+    finally:
+        dbm.rip_connection()
 
 
 def _copy_from_package(pkg: str, filename: str, dest: Path) -> None:
@@ -203,12 +223,18 @@ def create_auth(
     project_dir: str | Path,
     *,
     options: AppBuildOptions | None = None,
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
 ) -> Path:
     """Create a new Nexom auth app scaffold."""
     options = options or AppBuildOptions(port=7070)
+    if master_user_login_password is None:
+        master_user_login_password = secrets.token_urlsafe(14)
 
     project_root = Path(project_dir).expanduser().resolve()
     project_root.mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "db" / "auth").mkdir(parents=True, exist_ok=True)
+    (project_root / "data" / "log" / "auth").mkdir(parents=True, exist_ok=True)
 
     app_root = project_root / "auth"
     if app_root.exists():
@@ -231,6 +257,7 @@ def create_auth(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__master_user__": str(master_user),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -240,7 +267,78 @@ def create_auth(
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": "auth"})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
 
+    _bootstrap_auth_master(
+        project_root=project_root,
+        master_user=master_user,
+        master_user_login_password=master_user_login_password,
+    )
+
     return app_root
+
+
+def create_config(
+    project_dir: str | Path,
+    app_name: str,
+    *,
+    options: AppBuildOptions | None = None,
+    auth: bool = False,
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
+) -> Path:
+    """
+    Create only config.py for an existing app directory.
+
+    Raises:
+    - FileNotFoundError: app directory does not exist
+    - FileExistsError: config.py already exists
+    """
+    _validate_app_name(app_name)
+    options = options or AppBuildOptions(port=7070 if auth else 8080)
+
+    project_root = Path(project_dir).expanduser().resolve()
+    app_root = project_root / app_name
+    if not app_root.exists() or not app_root.is_dir():
+        raise FileNotFoundError(f"Target app directory does not exist: {app_root}")
+
+    config_path = app_root / "config.py"
+    if config_path.exists():
+        raise FileExistsError(f"config.py already exists: {config_path}")
+
+    if auth:
+        pkg = "nexom.assets.auth"
+        if master_user_login_password is None:
+            master_user_login_password = secrets.token_urlsafe(14)
+        (project_root / "data" / "db" / "auth").mkdir(parents=True, exist_ok=True)
+        (project_root / "data" / "log" / app_name).mkdir(parents=True, exist_ok=True)
+        app_name_for_template = "auth"
+    else:
+        pkg = "nexom.assets.app"
+        app_name_for_template = app_name
+
+    config_text = _read_text_from_package(pkg, "config.py")
+    config_enabled = _replace_many(
+        config_text,
+        {
+            "__prj_dir__": str(project_root),
+            "__app_name__": str(app_name_for_template),
+            "__app_dir__": str(app_root),
+            "__g_address__": options.address,
+            "__g_port__": str(options.port),
+            "__g_workers__": str(options.workers),
+            "__g_reload__": "True" if options.reload else "False",
+            "__master_user__": str(master_user),
+        },
+    )
+    config_path.write_text(config_enabled, encoding="utf-8")
+
+    if auth:
+        _bootstrap_auth_master(
+            project_root=project_root,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password or "",
+        )
+
+    return config_path
 
 
 def start_project(
@@ -252,6 +350,8 @@ def start_project(
     auth_options: AppBuildOptions | None = None,
     gateway: str = "none",  # none|nginx|apache
     domain: str = "",
+    master_user: str = "master_user",
+    master_user_login_password: str | None = None,
 ) -> Path:
     """
     Assumption: user already created the project directory and cd'ed into it.
@@ -271,10 +371,13 @@ def start_project(
     data_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     db_dir.mkdir(parents=True, exist_ok=True)
+    (db_dir / "auth").mkdir(parents=True, exist_ok=True)
 
     # main app + auth app
     main_opt = main_options or AppBuildOptions()
     auth_opt = auth_options or AppBuildOptions(port=7070)
+    if master_user_login_password is None:
+        master_user_login_password = secrets.token_urlsafe(14)
 
     # auth is usually fixed folder name "auth", but you asked folder name selectable.
     # create_auth creates "auth" fixed, so we generate via create_app then remove extras?
@@ -308,6 +411,7 @@ def start_project(
             "__g_port__": str(auth_opt.port),
             "__g_workers__": str(auth_opt.workers),
             "__g_reload__": "True" if auth_opt.reload else "False",
+            "__master_user__": str(master_user),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -317,6 +421,12 @@ def start_project(
     gunicorn_conf_text = gunicorn_conf_path.read_text(encoding="utf-8")
     gunicorn_conf_enabled = _replace_many(gunicorn_conf_text, {"__app_name__": auth_name})
     gunicorn_conf_path.write_text(gunicorn_conf_enabled, encoding="utf-8")
+
+    _bootstrap_auth_master(
+        project_root=root,
+        master_user=master_user,
+        master_user_login_password=master_user_login_password,
+    )
 
     # gateway/
     if gateway != "none":

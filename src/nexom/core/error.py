@@ -308,6 +308,12 @@ class AuthServiceUnavailableError(NexomError):
     def __init__(self) -> None:
         super().__init__("A09", "Authentication service is currently unavailable.")
 
+
+class AuthPermissionGroupAlreadyExistsError(NexomError):
+    """Permission group_id already exists."""
+    def __init__(self) -> None:
+        super().__init__("A10", "This permission group_id is already in use.")
+
 def _status_for_auth_error(code: str) -> int:
     return {
         "A01": 400,  # missing field
@@ -319,6 +325,7 @@ def _status_for_auth_error(code: str) -> int:
         "A07": 401,  # token expired
         "A08": 401,  # token revoked
         "A09": 503,  # auth service unavailable
+        "A10": 409,  # permission group_id already exists
     }.get(code, 400)
     
     

@@ -14,7 +14,9 @@ WORKERS: int = __g_workers__
 RELOAD: bool = __g_reload__
 
 # ======== auth service ========
-AUTH_DB: str = DATA_DIR + "/db/auth.db"
+AUTH_DB: str = DATA_DIR + "/db/auth/auth.db"
+MASTER_USER: str = "__master_user__"
+MASTER_PASSWORD: str = "NexomWebFramework"
 
 # ======== logger ========
 INFO_LOG: str = "__prj_dir__/data/log/__app_name__/info.log"

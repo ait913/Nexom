@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 from pathlib import Path
 
 from nexom.buildTools.build import (
     create_app,
     create_auth,
+    create_config,
     start_project,
     AppBuildOptions,
 )
@@ -83,6 +85,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--domain", default="", help="Domain for gateway template (default: placeholder text)")
 
+    # create-config
+    pc = subparsers.add_parser("create-config", help="Create only config.py for an existing app directory")
+    pc.add_argument("app_name", help="Existing app directory name")
+    pc.add_argument("--out", default=".", help="Project root directory (default: current directory)")
+    pc.add_argument("--auth", action="store_true", help="Use auth config template")
+    pc.add_argument("--address", default="0.0.0.0", help="Bind address")
+    pc.add_argument("--port", type=int, default=None, help="Bind port")
+    pc.add_argument("--workers", type=int, default=4, help="Gunicorn workers")
+    pc.add_argument("--reload", action="store_true", help="Enable auto-reload")
+
     args = parser.parse_args(argv)
 
     if args.command == "test":
@@ -94,6 +106,8 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "start-project":
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14)
         main_opt = AppBuildOptions(
             address=args.address,
             port=args.port,
@@ -114,8 +128,12 @@ def main(argv: list[str] | None = None) -> None:
             auth_options=auth_opt,
             gateway=args.gateway,
             domain=args.domain,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password,
         )
         print(f"Initialized Nexom project at: {out}")
+        print(f"[auth] MASTER_USER={master_user}")
+        print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
         return
 
     if args.command == "create-app":
@@ -136,14 +154,47 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "create-auth":
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14)
         options = AppBuildOptions(
             address=args.address,
             port=args.port,
             workers=args.workers,
             reload=args.reload,
         )
-        out_dir = create_auth(Path(args.out), options=options)
+        out_dir = create_auth(
+            Path(args.out),
+            options=options,
+            master_user=master_user,
+            master_user_login_password=master_user_login_password,
+        )
         print(f"Created Nexom auth app project at: {out_dir}")
+        print(f"[auth] MASTER_USER={master_user}")
+        print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
+        return
+
+    if args.command == "create-config":
+        default_port = 7070 if args.auth else 8080
+        master_user = "master_user"
+        master_user_login_password = secrets.token_urlsafe(14) if args.auth else ""
+        options = AppBuildOptions(
+            address=args.address,
+            port=(default_port if args.port is None else args.port),
+            workers=args.workers,
+            reload=args.reload,
+        )
+        out_file = create_config(
+            Path(args.out),
+            args.app_name,
+            options=options,
+            auth=bool(args.auth),
+            master_user=master_user,
+            master_user_login_password=master_user_login_password or None,
+        )
+        print(f"Created config at: {out_file}")
+        if args.auth:
+            print(f"[auth] MASTER_USER={master_user}")
+            print(f"[auth] MASTER_USER_LOGIN_PASSWORD={master_user_login_password}")
         return
 
 

@@ -11,7 +11,16 @@ from nexom.core.error import NexomError
 from nexom.core.log import AppLogger, AuthLogger
 from nexom.app.auth import AuthService
 
-from auth.config import AUTH_DB, INFO_LOG, WARN_LOG, ERR_LOG, ACES_LOG, AUTH_LOG
+from auth.config import (
+    AUTH_DB,
+    INFO_LOG,
+    WARN_LOG,
+    ERR_LOG,
+    ACES_LOG,
+    AUTH_LOG,
+    MASTER_USER,
+    MASTER_PASSWORD,
+)
 
 
 # Logger
@@ -23,7 +32,13 @@ logger = AppLogger(
 )
 
 # AuthService
-service = AuthService(AUTH_DB, AUTH_LOG)
+service = AuthService(
+    AUTH_DB,
+    AUTH_LOG,
+    master_user=MASTER_USER,
+    master_login_password="",
+    master_password=MASTER_PASSWORD,
+)
 
 
 def _ip(environ: dict) -> str:

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from nexom.app.request import Request
-from nexom.app.response import Response
+from nexom.app.response import Response, JsonResponse
 from nexom.app.path import Router, Get, Post, Static
 from nexom.app.middleware import MiddlewareChain, CORSMiddleware
+from nexom.core.error import PathNotFoundError
 
 from conftest import make_environ
 
@@ -70,3 +72,42 @@ def test_middleware_chain_and_cors():
     res = cors(Request(env), {}, handler)
     headers = dict(res.headers)
     assert headers.get("Access-Control-Allow-Origin") == "*"
+
+
+def test_router_does_not_match_extra_segments_for_static_route():
+    def handler(req, args):
+        return Response("ok")
+
+    routing = Router(Get("banana/", handler, "Banana"))
+    with pytest.raises(PathNotFoundError):
+        routing.handle(Request(make_environ(method="GET", path="/banana/hoge1/hoge2")))
+
+
+def test_router_allows_missing_trailing_dynamic_as_none():
+    def handler(req, args):
+        return JsonResponse({"arg1": args.get("arg1")})
+
+    routing = Router(Get("user/{arg1}", handler, "User"))
+
+    res1 = routing.handle(Request(make_environ(method="GET", path="/user/")))
+    assert res1.status_code == 200
+    assert res1.body.decode("utf-8").find('"arg1": null') >= 0
+
+    res2 = routing.handle(Request(make_environ(method="GET", path="/user/abc")))
+    assert res2.status_code == 200
+    assert res2.body.decode("utf-8").find('"arg1": "abc"') >= 0
+
+
+def test_router_allows_missing_leading_dynamic_as_none():
+    def handler(req, args):
+        return JsonResponse({"dummy": args.get("dummy")})
+
+    routing = Router(Get("{dummy}/val1", handler, "DynStatic"))
+
+    res1 = routing.handle(Request(make_environ(method="GET", path="/val1")))
+    assert res1.status_code == 200
+    assert res1.body.decode("utf-8").find('"dummy": null') >= 0
+
+    res2 = routing.handle(Request(make_environ(method="GET", path="/abc/val1")))
+    assert res2.status_code == 200
+    assert res2.body.decode("utf-8").find('"dummy": "abc"') >= 0

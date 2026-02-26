@@ -53,7 +53,9 @@ class AuthPages(Path):
             LogoutPage(str(root / logout_path), self.auth_server),
         )
 
-        super().__init__(path, self._handler, "UserAuthPage")
+        base = path.strip("/")
+        route = '{"*"}' if not base else f'{base}/{{"*"}}'
+        super().__init__(route, self._handler, "UserAuthPage")
 
     def _handler(self, req: Request, args: dict) -> JsonResponse:
 
@@ -137,4 +139,3 @@ class LogoutPage(Path):
 
         set_cookie = Cookie(KEY_NAME, "", Path="/", MaxAge=0)
         return Redirect(redirect_url, cookie=str(set_cookie))
-
