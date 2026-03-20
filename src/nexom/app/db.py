@@ -120,7 +120,7 @@ class DatabaseManager:
             _call_error_handler(e)
 
 
-    def execute_many(self, sql_inserts: Iterable[ list[ tuple[str, tuple] ] ]) -> None:
+    def execute_many(self, sql_inserts: Iterable[ tuple[str, tuple] ]) -> None:
         """Execute multiple SQL statements in a single transaction."""
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
