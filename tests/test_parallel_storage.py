@@ -93,7 +93,6 @@ def test_parallel_storage_format_public_id(tmp_path: Path):
     assert path.name.endswith("__PSC_a-2_v-1.txt")
 
 
-@pytest.mark.xfail(reason="comp_img currently calls missing format_psc_contents_id")
 def test_comp_img_webp(tmp_path: Path):
     PIL = pytest.importorskip("PIL")
     from PIL import Image
@@ -114,6 +113,7 @@ def test_comp_img_webp(tmp_path: Path):
     )
 
     meta = ps._PSDBM.getMeta(public_id=public_id)
+    ps._PSDBM.update_types(meta.contents_id, "Images")
     original = contents / format_psc_filename(meta.contents_id, meta.suffix)
     contents.mkdir(parents=True, exist_ok=True)
 
@@ -123,3 +123,39 @@ def test_comp_img_webp(tmp_path: Path):
     out = ps.comp_img(public_id, 8, 8, 80)
     assert out.exists()
     assert out.suffix == ".webp"
+    with Image.open(out) as out_im:
+        assert out_im.size == (8, 8)
+
+
+def test_comp_img_preserves_exif_orientation(tmp_path: Path):
+    PIL = pytest.importorskip("PIL")
+    from PIL import Image
+
+    db = tmp_path / "ps.db"
+    contents = tmp_path / "contents"
+
+    ps = ParallelStorage(str(db), str(contents))
+    uploader = MultiPartUploader(str(db), str(tmp_path / "workers"), str(contents))
+
+    public_id = uploader.register(
+        filename="img.jpg",
+        size=1,
+        pid="pid",
+        permission_id=None,
+        total_chunks=1,
+        sha256=_sha256(b"x"),
+    )
+
+    meta = ps._PSDBM.getMeta(public_id=public_id)
+    ps._PSDBM.update_types(meta.contents_id, "Images")
+    original = contents / format_psc_filename(meta.contents_id, meta.suffix)
+    contents.mkdir(parents=True, exist_ok=True)
+
+    img = Image.new("RGB", (20, 10), color=(0, 255, 0))
+    exif = Image.Exif()
+    exif[274] = 6
+    img.save(original, format="JPEG", exif=exif)
+
+    out = ps.comp_img(public_id, None, None, 80)
+    with Image.open(out) as out_im:
+        assert out_im.size == (10, 20)

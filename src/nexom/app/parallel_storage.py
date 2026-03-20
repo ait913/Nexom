@@ -179,6 +179,8 @@ class ParallelStorage:
         self.contents_dir.mkdir(parents=True, exist_ok=True)
         
         with Image.open(str(original_path)) as im:
+            from PIL import ImageOps  # type: ignore
+            im = ImageOps.exif_transpose(im)
             im = im.convert("RGB")
 
             if width is None and height is None:
