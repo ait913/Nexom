@@ -321,7 +321,12 @@ class Redirect(Response):
     ) -> None
 ```
 
-前段の拒否 (`allow_external` に**関わらず**): `loc` が空、**先頭が空白 (`0x20`)**、または **`loc` のどこかに ASCII `0x00`〜`0x1F` / `0x7F` が含まれる** なら `ResponseRedirectExternalError` (RS02)。WHATWG URL パーサは TAB / LF / CR を位置に関係なく除去してから解釈するので `/\t\evil.example` が `https://evil.example/` に解決される (Codex 第 2 パス RG04 で実機確認)。先頭空白も除去されるので ` /\evil` が外部になる。先頭以外の空白 (`/a b`) は通る。
+検査順と例外種別 (`allow_external` に**関わらず**両方とも拒否):
+1. **ヘッダ値検証を先に通す** (`_validate_header("Location", loc)`、§6.3 と同じ正規表現 `[\t\x20-\x7e\x80-\xff]*`)。CR / LF / `0x00`〜`0x08` / `0x0A`〜`0x1F` / `0x7F` / Latin-1 外の文字を含めば **RS01** (`ResponseHeaderInvalidError`)
+2. 次に Location 固有の拒否: `loc` が空、**先頭が空白 (`0x20`)**、または **TAB (`0x09`、ヘッダ値としては合法だが WHATWG URL パーサが位置に関係なく除去する) を含む** なら **RS02** (`ResponseRedirectExternalError`)。`/\t\evil.example` が `https://evil.example/` に解決される (Codex 第 2 パス RG04 で実機確認)。先頭空白も除去されるので ` /\evil` が外部になる。先頭以外の空白 (`/a b`) は通る
+3. 最後に `_is_local_location` (下記) で外部判定 → `allow_external=False` なら RS02
+
+整理: 「ヘッダとして不正な文字」は RS01、「ヘッダとしては合法だが URL として外部化・曖昧化する形」は RS02。
 
 ローカル判定 `_is_local_location(loc)` (全部 True で「ローカル」):
 1. `loc` が空でない、かつ先頭が `\` でない
@@ -765,8 +770,9 @@ class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(se
 | R4 | `Redirect("/x\r\nSet-Cookie: a=b")` | RS01 (ヘッダ値検証) |
 | R5 | `Redirect("/x", status=308)` → 308; `Redirect("/x", status=200)` → `ValueError` | |
 | R6 | `Redirect("next")`, `Redirect("?a=1")`, `Redirect("/x?u=https://ok")` | 通る (ローカル) |
-| R7 | `Redirect(" /\\evil.example")` (先頭空白)、`Redirect("\t/next")`、`Redirect("")` | RS02。**`allow_external=True` を付けても RS02** (`Redirect(" https://x", allow_external=True)` も RS02) |
-| R9 | `Redirect("/\\t\\\\evil.example")` (途中 TAB、Python リテラル `"/\t\\evil.example"`)、`Redirect("/ne\\x7fxt")`、`Redirect("/a\\nb")`、`Redirect("https://ok.example/\\tx", allow_external=True)` | いずれも RS02 (制御文字は位置に関係なく拒否。`allow_external=True` でも) |
+| R7 | `Redirect(" /\\evil.example")` (先頭空白)、`Redirect("\t/next")` (先頭 TAB)、`Redirect("")` | RS02 (ヘッダ値としては合法、Location として不正)。**`allow_external=True` を付けても RS02** (`Redirect(" https://x", allow_external=True)` も RS02) |
+| R9 | `Redirect("/\\t\\\\evil.example")` (途中 TAB、Python リテラル `"/\t\\evil.example"`)、`Redirect("https://ok.example/\\tx", allow_external=True)` | **RS02** (TAB はヘッダ検証を通るが Location として拒否。`allow_external=True` でも) |
+| R10 | `Redirect("/ne\\x7fxt")`、`Redirect("/a\\nb")`、`Redirect("/a\\x00b")`、`Redirect("/x\\r\\nSet-Cookie: a=b")` (R4 と同じ) | **RS01** (`ResponseHeaderInvalidError`。ヘッダ値検証が先に走る)。`allow_external=True` でも RS01 |
 | R8 | `Redirect("/a b")` (先頭以外の空白) | 通る (`Location: /a b`。ヘッダ値検証は空白を許す) |
 
 ### 17.4 Request (Q)

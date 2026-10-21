@@ -308,11 +308,14 @@ class AuthClient:
 class AuthPages(Path):
     def __init__(self, path: str, auth_server: str, *,
                  login_path: str = "login/", signup_path: str = "signup/", logout_path: str = "logout/",
-                 client_ip: Callable[[Request], str] | None = None) -> None
+                 client_ip: Callable[[Request], str] | None = None,
+                 logger: AppLogger | None = None) -> None
     # client_ip=None → req.client_ip (http doc のプロキシ信頼契約)。テストや独自配線は callable を渡す
+    # logger は LogoutPage に渡す (K-6b の `logout revoke failed: A09` warn 用)。None なら warn を出さない (他の挙動は不変)
 class LoginPage(Path):  def __init__(self, path: str, auth_server: str, *, client_ip: Callable[[Request], str] | None = None)
 class SignupPage(Path): 同上
-class LogoutPage(Path): 同上
+class LogoutPage(Path): def __init__(self, path: str, auth_server: str, *, client_ip: Callable[[Request], str] | None = None,
+                                     logger: AppLogger | None = None)
 ```
 
 ### 4.7 `core/error.py` Auth 節 (追加分)
