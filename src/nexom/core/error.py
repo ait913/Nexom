@@ -341,12 +341,7 @@ class PsStatusTypesError(NexomError):
 class PsFileStatusInvalidError(NexomError):
     """This contents_id is not available."""
     def __init__(self) -> None:
-        super().__init__("PS02", f"This File is status invalid.")
-        
-class PsFileStatusInvalidError(NexomError):
-    """This contents_id is not available."""
-    def __init__(self) -> None:
-        super().__init__("PS03", f"This File is status invalid.")
+        super().__init__("PS02", "This file is in an invalid status for the operation.")
         
 class PsArgmentsError(NexomError):
     """Raised when an argument value is invalid"""
@@ -371,14 +366,52 @@ class PsDataCorruotedError(NexomError):
 class PsChunkEntityTooLargeError(NexomError):
     """This occurs when data is corrupted."""
     def __init__(self) -> None:
-        super().__init__("PS08", f"Data is over size")
+        super().__init__("PS08", "Chunk is over size.")
         
 class PsPermissionError(NexomError):
     """This occurs when data is corrupted."""
     def __init__(self) -> None:
-        super().__init__("PS09", f"Data is over size")
+        super().__init__("PS09", "Permission denied. pid does not own this content.")
         
 class PsFileTypesError(NexomError):
     """This error occurs when the FileType is invalid."""
-    def __init__(self, status) -> None:
-        super().__init__("PS010", f"This FileType is invalid {str(status)}")
+    def __init__(self, types: str | None = None) -> None:
+        suffix = f" {types}" if types is not None else ""
+        super().__init__("PS010", f"This FileType is invalid{suffix}")
+
+
+class PsSuffixInvalidError(NexomError):
+    """Raised when a file suffix is invalid."""
+    def __init__(self, suffix: str) -> None:
+        super().__init__("PS11", f"This file suffix is invalid. '{suffix}'")
+
+
+class PsPathEscapeError(NexomError):
+    """Raised when a path escapes the storage directory."""
+    def __init__(self) -> None:
+        super().__init__("PS12", "Path escapes the storage directory.")
+
+
+class PsImageTooLargeError(NexomError):
+    """Raised when an image exceeds the pixel limit."""
+    def __init__(self, pixels: int | None = None) -> None:
+        suffix = f" pixels={pixels}" if pixels is not None else ""
+        super().__init__("PS13", f"Image is over size.{suffix}")
+
+
+class PsUploadTooLargeError(NexomError):
+    """Raised when an upload exceeds the size limit."""
+    def __init__(self, size: int, limit: int) -> None:
+        super().__init__("PS14", f"Upload is over size. size={size} limit={limit}")
+
+
+class PsChunkSizeMismatchError(NexomError):
+    """Raised when a chunk size differs from the expected size."""
+    def __init__(self, expected: int, actual: int) -> None:
+        super().__init__("PS15", f"Chunk size mismatch. expected={expected} actual={actual}")
+
+
+class PsTooManyActiveUploadsError(NexomError):
+    """Raised when the active upload limit is reached."""
+    def __init__(self, limit: int) -> None:
+        super().__init__("PS16", f"Too many active uploads. limit={limit}")
