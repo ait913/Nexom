@@ -73,6 +73,7 @@ def _token_hash(token: str) -> str:
 class AuthPolicy:
     pbkdf2_iterations: int = 600_000
     user_id_pattern: str = r"[a-z0-9][a-z0-9_.-]{2,31}"
+    user_id_max_len: int = 32
     public_name_max_len: int = 64
     password_min_len: int = 8
     password_max_bytes: int = 256
@@ -90,6 +91,16 @@ class AuthPolicy:
     hash_window_sec: float = 1.0
     max_sessions_per_user: int = 20
 
+    # login / reauth DoS bounds (format is not checked there). Never below the signup
+    # policy, so a credential that could be registered can always be used to log in.
+    @property
+    def login_user_id_max_len(self) -> int:
+        return max(1024, self.user_id_max_len)
+
+    @property
+    def login_password_max_bytes(self) -> int:
+        return max(1024, self.password_max_bytes)
+
 
 def _required_text(value: str, field: str) -> str:
     if value is None or value == "":
@@ -101,7 +112,7 @@ def _required_text(value: str, field: str) -> str:
 
 def validate_user_id(user_id: str, policy: AuthPolicy) -> str:
     value = _required_text(user_id, "user_id").strip()
-    if not re.fullmatch(policy.user_id_pattern, value):
+    if len(value) > policy.user_id_max_len or not re.fullmatch(policy.user_id_pattern, value):
         raise AuthInvalidFieldError("user_id")
     return value
 
@@ -129,18 +140,14 @@ def _password_limit(password: str, policy: AuthPolicy, field: str) -> str:
     return value
 
 
-_LOGIN_USER_ID_MAX_CHARS = 1024
-_LOGIN_PASSWORD_MAX_BYTES = 1024
-
-
-def _login_password_limit(password: str, field: str) -> str:
+def _login_password_limit(password: str, field: str, policy: AuthPolicy) -> str:
     """DoS bound only: login/reauth never apply the signup password policy."""
     value = _required_text(password, field)
     try:
         size = len(value.encode("utf-8"))
     except UnicodeEncodeError:
         raise AuthInvalidFieldError(field) from None
-    if size > _LOGIN_PASSWORD_MAX_BYTES:
+    if size > policy.login_password_max_bytes:
         raise AuthInvalidFieldError(field)
     return value
 
@@ -679,7 +686,7 @@ class AuthService:
         target = _required_text(data.get("target_user_id"), "target_user_id").strip()
         if not target:
             raise AuthMissingFieldError("target_user_id")
-        password = _login_password_limit(data.get("login_password"), "login_password")
+        password = _login_password_limit(data.get("login_password"), "login_password", self.dbm.policy)
         client_ip = normalize_ip(data.get("client_ip"))
         if not self.dbm.is_master_uid(session.uid):
             raise AuthForbiddenError()
@@ -1252,9 +1259,9 @@ class AuthDBM(DatabaseManager):
 
     def _authenticate(self, user_id: str, password: str, ip: str, *, reauth: bool = False):
         user_id = _required_text(user_id, "user_id")
-        if len(user_id) > _LOGIN_USER_ID_MAX_CHARS:
+        if len(user_id) > self.policy.login_user_id_max_len:
             raise AuthInvalidFieldError("user_id")
-        password = _login_password_limit(password, "password")
+        password = _login_password_limit(password, "password", self.policy)
         user_key, ip_key = f"login_user:{user_id}", f"login_ip:{ip}"
         self._locked_check_logged(ip_key, ip)
         self._locked_check_logged(user_key, ip)
@@ -1297,19 +1304,29 @@ class AuthDBM(DatabaseManager):
         ip = normalize_ip(client_ip)
         row, needs_rehash = self._authenticate(user_id, password, ip)
         uid, user_id, public_name = row[:3]
-        if needs_rehash:
-            # Conditional on the exact credentials we verified: a concurrent password
-            # change makes this a no-op (rehash happens on the next login instead).
-            self.execute(
-                "UPDATE users SET password_hash=?,password_salt='' "
-                "WHERE uid=? AND password_hash=? AND password_salt=?",
-                self._hash_password(password), uid, row[3], row[4])
+        # Hash outside the write lock; the UPDATE itself is inside the transaction below.
+        new_hash = self._hash_password(password) if needs_rehash else None
         token, sid, now = _rand(32), _rand(), self.clock()
         exp = now + ttl_sec
-        with self._transaction():
-            self.execute("""INSERT INTO sessions(sid,uid,token_hash,expires_at,user_agent,created_at)
-                VALUES(?,?,?,?,?,?)""", sid, uid, _token_hash(token), exp, user_agent, now)
-            self._sweep_sessions(uid)
+        try:
+            with self._transaction():
+                # Re-read the credentials under BEGIN IMMEDIATE: a password change that
+                # landed between verification and here invalidates this login (A03), so
+                # no session is issued from a stale verification and no old hash is restored.
+                current = self.execute(
+                    "SELECT password_hash,password_salt FROM users WHERE uid=?", uid)
+                if not current or current[0][0] != row[3] or current[0][1] != row[4]:
+                    raise AuthInvalidCredentialsError()
+                if new_hash is not None:
+                    self.execute("UPDATE users SET password_hash=?,password_salt='' WHERE uid=?",
+                                 new_hash, uid)
+                self.execute("""INSERT INTO sessions(sid,uid,token_hash,expires_at,user_agent,created_at)
+                    VALUES(?,?,?,?,?,?)""", sid, uid, _token_hash(token), exp, user_agent, now)
+                self._sweep_sessions(uid)
+        except AuthInvalidCredentialsError:
+            self._log_event("LOGIN_NG", subject=user_id, ip=ip, detail="reason=stale")
+            self._sweep_attempts()
+            raise
         self._log_event("LOGIN_OK", subject=user_id, ip=ip)
         self._sweep_attempts()
         return LocalSession(sid, uid, user_id, public_name, token, exp, None, user_agent)
@@ -1355,7 +1372,7 @@ class AuthDBM(DatabaseManager):
         self._log_event("PUBLIC_NAME_CHANGE", subject=self.get_user_id_by_pid(uid) or "-")
 
     def reauth(self, *, uid: str, password: str, client_ip: str) -> None:
-        _login_password_limit(password, "password")
+        _login_password_limit(password, "password", self.policy)
         ip = normalize_ip(client_ip)
         user_id = self.get_user_id_by_pid(uid)
         if user_id is None:
@@ -1366,7 +1383,7 @@ class AuthDBM(DatabaseManager):
     def update_password(self, *, uid: str, current_password: str, new_password: str, client_ip: str) -> None:
         ip = normalize_ip(client_ip)
         validate_password(new_password, self.policy, field="new_password")
-        _login_password_limit(current_password, "current_password")
+        _login_password_limit(current_password, "current_password", self.policy)
         self.reauth(uid=uid, password=current_password, client_ip=ip)
         password_hash = self._hash_password(new_password)
         self.execute_many([

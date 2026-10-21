@@ -186,8 +186,14 @@ class Redirect(Response):
     ) -> None:
         if status not in (301, 302, 303, 307, 308):
             raise ValueError("Invalid redirect status")
+        # Header-injection class first (CR/LF and other controls -> RS01, as for any header).
+        _validate_header("Location", location)
+        # Local redirects: reject a leading space and any C0 control / DEL anywhere
+        # (browsers strip TAB/LF/CR mid-string, so "/\t\\evil" becomes "/\\evil").
         if not allow_external and (
-            (location and ord(location[0]) < 0x21) or not _is_local_location(location)
+            (location and location[0] == " ")
+            or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in location)
+            or not _is_local_location(location)
         ):
             raise ResponseRedirectExternalError(location)
         extra = list(headers) if headers else []

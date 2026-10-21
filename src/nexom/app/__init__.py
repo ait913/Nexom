@@ -17,7 +17,7 @@ from .path import Path, Get, Post, Static, Router
 from .cookie import Cookie, RequestCookies
 
 # ---- Templates ----
-from .template import ObjectHTMLTemplates, Markup, AttrSafe, escape, safe_url, json_script
+from .template import ObjectHTMLTemplates, Markup, escape, safe_url, json_script
 
 # ---- Auth ----
 from .auth import AuthService, AuthClient, KEY_NAME
@@ -54,7 +54,6 @@ __all__ = [
     # templates
     "ObjectHTMLTemplates",
     "Markup",
-    "AttrSafe",
     "escape",
     "safe_url",
     "json_script",

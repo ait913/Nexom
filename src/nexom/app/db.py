@@ -52,6 +52,7 @@ class DatabaseManager:
 
         self._conn: Connection | None = None
         self._cursor: Cursor | None = None
+        self._tx_depth: int = 0  # immediate_transaction() nesting depth
 
         self.start_connection(auto_commit=auto_commit)
         try:
@@ -109,23 +110,53 @@ class DatabaseManager:
 
     @contextmanager
     def immediate_transaction(self) -> Iterator[None]:
-        """Run a block inside BEGIN IMMEDIATE ... COMMIT (rolled back on error)."""
+        """
+        Run a block inside BEGIN IMMEDIATE ... COMMIT (rolled back on error).
+
+        Nestable: if the connection is already in a transaction, the block runs
+        inside a SAVEPOINT (RELEASE on success, ROLLBACK TO on error) and never
+        commits by itself, so an exception in the outer block also discards the
+        inner changes. commit() is a no-op while inside a block.
+        """
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
         previous = self.auto_commit
         self.auto_commit = False
+        self._tx_depth += 1
         try:
-            try:
-                self._cursor.execute("BEGIN IMMEDIATE")
-            except Error as e:
-                _call_error_handler(e)
-            try:
-                yield
-                self._conn.commit()
-            except BaseException:
-                self._conn.rollback()
-                raise
+            if self._conn.in_transaction:
+                name = f"sp_{self._tx_depth}"
+                try:
+                    self._cursor.execute(f"SAVEPOINT {name}")
+                except Error as e:
+                    _call_error_handler(e)
+                try:
+                    yield
+                except BaseException:
+                    if self._conn.in_transaction:  # execute() may already have rolled back
+                        try:
+                            self._cursor.execute(f"ROLLBACK TO {name}")
+                            self._cursor.execute(f"RELEASE {name}")
+                        except Error:
+                            pass
+                    raise
+                try:
+                    self._cursor.execute(f"RELEASE {name}")
+                except Error as e:
+                    _call_error_handler(e)
+            else:
+                try:
+                    self._cursor.execute("BEGIN IMMEDIATE")
+                except Error as e:
+                    _call_error_handler(e)
+                try:
+                    yield
+                    self._conn.commit()
+                except BaseException:
+                    self._conn.rollback()
+                    raise
         finally:
+            self._tx_depth -= 1
             self.auto_commit = previous
 
     def rip_connection(self) -> None:
@@ -143,7 +174,9 @@ class DatabaseManager:
         self._conn.commit()
         
     def commit(self) -> None:
-        """Public commit wrapper."""
+        """Public commit wrapper (no-op inside immediate_transaction(); the block commits)."""
+        if self._tx_depth > 0:
+            return
         self._commit()
 
     # ---- new canonical names ----

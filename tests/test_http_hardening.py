@@ -210,11 +210,13 @@ def test_E26_markup_escaped_in_attr_position_but_not_text():
     assert _eng("<p>{{ v }}</p>").render("t", v=v) == '<p>y" onmouseover="alert(1)</p>'
 
 
-def test_E27_attr_position_detection_tolerates_spaces_and_attr_name_slot_is_text():
+def test_E27_attr_position_detection_tolerates_spaces_and_attr_name_slot_is_rejected():
     out = _eng("<a title = '{{ v }}'>").render("t", v=Markup("<b>"))
     assert out == "<a title = '&lt;b&gt;'>"
-    out2 = _eng('<p data-x="a" {{ v }}>').render("t", v=Markup("<b>"))
-    assert out2 == '<p data-x="a" <b>>'
+    # Slot in attribute-name position (IN_TAG) is rejected at load time (OH06, tokenizer rule (d)).
+    with pytest.raises(TemplateUnsafeSlotError) as ei:
+        _eng('<p data-x="a" {{ v }}>')
+    assert ei.value.code == "OH06" and "tag/attribute name position" in str(ei.value)
 
 
 @pytest.mark.parametrize(

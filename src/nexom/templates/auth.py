@@ -14,6 +14,7 @@ from ..app.response import HtmlResponse, JsonResponse, Redirect, Response
 from ..app.cookie import Cookie
 from ..app.path import Path, Router
 from ..core.object_html_render import HTMLDoc, ObjectHTML
+from ..core.log import AppLogger
 from ..core.error import (
     NexomError, PathNotFoundError, RequestParseError, RequestEntityTooLargeError,
     AuthMissingFieldError, _status_for_auth_error,
@@ -68,13 +69,14 @@ class AuthPages(Path):
         signup_path: str = "signup/",
         logout_path: str = "logout/",
         client_ip: Callable[[Request], str] | None = None,
+        logger: AppLogger | None = None,
     ) -> None:
         self.auth_server = auth_server
         root = plb.Path(path)
         self.routing = Router(
             LoginPage(str(root / login_path), auth_server, client_ip=client_ip),
             SignupPage(str(root / signup_path), auth_server, client_ip=client_ip),
-            LogoutPage(str(root / logout_path), auth_server, client_ip=client_ip),
+            LogoutPage(str(root / logout_path), auth_server, client_ip=client_ip, logger=logger),
         )
         base = path.strip("/")
         route = '{"*"}' if not base else f'{base}/{{"*"}}'
@@ -146,10 +148,12 @@ class SignupPage(Path):
 
 class LogoutPage(Path):
     def __init__(self, path: str, auth_server: str, *,
-                 client_ip: Callable[[Request], str] | None = None) -> None:
+                 client_ip: Callable[[Request], str] | None = None,
+                 logger: AppLogger | None = None) -> None:
         super().__init__(path, self._handler, "LogoutPage", methods={"POST"})
         self.client = AuthClient(auth_server)
         self.client_ip = client_ip
+        self.logger = logger
 
     def _handler(self, req: Request, args: dict) -> Response:
         # AuthPages dispatches by path; retain the JSON contract on that route.
@@ -162,6 +166,7 @@ class LogoutPage(Path):
             return JsonResponse({"ok": False, "error": "A13"}, status=403)
         token = req.cookie.get(KEY_NAME) if req.cookie else None
         set_cookie = Cookie.delete(KEY_NAME, path="/")
+        is_form = req.content_type == "application/x-www-form-urlencoded"
         if token:
             try:
                 self.client.logout(
@@ -169,7 +174,12 @@ class LogoutPage(Path):
                     client_ip=req.client_ip if self.client_ip is None else self.client_ip(req),
                 )
             except NexomError as e:
-                return _auth_error(e, cookie=set_cookie)
-        if req.content_type == "application/x-www-form-urlencoded":
+                if not is_form:
+                    return _auth_error(e, cookie=set_cookie)
+                # K-6b: form POST never answers JSON; the browser cookie is cleared
+                # regardless and the failed revoke is logged on the app side.
+                if self.logger is not None:
+                    self.logger.warn(f"logout revoke failed: {e.code}")
+        if is_form:
             return Redirect("/", cookie=set_cookie)
         return JsonResponse({"ok": True}, cookie=set_cookie)

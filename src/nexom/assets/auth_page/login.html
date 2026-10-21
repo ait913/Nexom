@@ -122,7 +122,7 @@
   </style>
 </head>
 
-<body>
+<body data-page-path="/{{ page_path }}">
   <div class="wrap">
     <section class="card">
       <h1>Login</h1>
@@ -147,7 +147,7 @@
 
   <script>
     const AUTH_BASE = ""
-    const PAGE_PATH = "/{{ page_path }}"
+    const PAGE_PATH = document.body.dataset.pagePath
 
     const error_code_for_message = {
       // ===== Auth errors =====

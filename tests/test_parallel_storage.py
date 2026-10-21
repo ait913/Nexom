@@ -37,6 +37,7 @@ from nexom.core.error import (
     NexomError,
     PsArgmentsError,
     PsChunkEntityTooLargeError,
+    PsChunkHashMismatchError,
     PsChunkSizeMismatchError,
     PsContentsIDInvalidError,
     PsDataCorruotedError,
@@ -916,15 +917,26 @@ def test_E13_chunk_over_max(env):
         env.up.parts_upload("A", pub, 0, blob, _sha(blob))
 
 
-def test_E14_E15_wrong_chunk_sha_discards_workdir(env):
+def test_E14_E15_wrong_chunk_sha_keeps_workdir_and_resend_recovers(env):
+    # Leader ruling (storage doc E-14 / E-14a / E-15): a chunk sha mismatch is PS17,
+    # status is unchanged and the working directory survives; resending the chunk recovers.
     data = b"hello-world-012345"
     pub = env.up.register("f.txt", len(data), "A", 2, _sha(data))
-    with pytest.raises(PsDataCorruotedError):
+    with pytest.raises(PsChunkHashMismatchError) as ei:  # E-14a: INIT stays INIT
         env.up.parts_upload("A", pub, 0, data[:9], _sha(b"wrong"))
-    assert env.ps.getMeta(None, pub).status == "ERROR"
-    assert not (env.workers / pub).exists()
-    with pytest.raises(PsFileStatusInvalidError):
-        env.up.parts_upload("A", pub, 0, data[:9], _sha(data[:9]))
+    assert ei.value.code == "PS17" and ei.value.count == 0
+    assert env.ps.getMeta(None, pub).status == "INIT"
+    assert (env.workers / pub / "meta.json").exists()
+    assert not (env.workers / pub / "chunk0.parts").exists()
+    env.up.parts_upload("A", pub, 0, data[:9], _sha(data[:9]))
+    with pytest.raises(PsChunkHashMismatchError):  # E-14: UPLOADING stays UPLOADING, chunk0 kept
+        env.up.parts_upload("A", pub, 1, data[9:], _sha(b"wrong"))
+    assert env.ps.getMeta(None, pub).status == "UPLOADING"
+    assert (env.workers / pub / "chunk0.parts").exists()
+    assert not (env.workers / pub / "chunk1.parts").exists()
+    env.up.parts_upload("A", pub, 1, data[9:], _sha(data[9:]))  # E-15: resend same count
+    assert env.ps.getMeta(None, pub).status == "READY"
+    assert env.up.commit("A", pub).status == "COMMITTED"
 
 
 def test_E16_commit_before_all_chunks(env):

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.object_html_render import (
-    HTMLDoc, HTMLDocLib, ObjectHTML, Markup, AttrSafe, escape, safe_url, json_script,
+    HTMLDoc, HTMLDocLib, ObjectHTML, Markup, escape, safe_url, json_script,
 )
 from ..core.error import TemplateNotFoundError, TemplateInvalidNameError, TemplatesNotDirError
 

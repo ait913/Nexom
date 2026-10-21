@@ -15,7 +15,7 @@ import json
 
 from .db import DatabaseManager
 
-from ..core.error import PsStatusTypesError, PsFileStatusInvalidError, PsArgmentsError, PsPublicIDInvalidError, PsContentsIDInvalidError, PsDataCorruotedError, PsChunkEntityTooLargeError, PsPermissionError, PsFileTypesError, PsSuffixInvalidError, PsImageTooLargeError, PsPathEscapeError, PsUploadTooLargeError, PsChunkSizeMismatchError, PsTooManyActiveUploadsError
+from ..core.error import PsStatusTypesError, PsFileStatusInvalidError, PsArgmentsError, PsPublicIDInvalidError, PsContentsIDInvalidError, PsDataCorruotedError, PsChunkEntityTooLargeError, PsPermissionError, PsFileTypesError, PsSuffixInvalidError, PsImageTooLargeError, PsPathEscapeError, PsUploadTooLargeError, PsChunkSizeMismatchError, PsTooManyActiveUploadsError, PsChunkHashMismatchError
 
 DEFAULT_CHUNK_MAX_SIZE = 10 * 1024 * 1024
 DEFAULT_MIN_CHUNK_SIZE = 256 * 1024
@@ -522,7 +522,7 @@ class MultiPartUploader:
         return UploadMeta.readJson(self.working_root / public_id / "meta.json")
 
     def _failed(self, pid: str, public_id: str) -> None:
-        """Retain the failed row and discard its working directory."""
+        """Retain the failed row (status ERROR) and discard its working directory. Called by commit only."""
         meta = self._PSDBM.getMeta(public_id=public_id, pid=pid)
         self._PSDBM.status_change(pid, meta.contents_id, "ERROR")
         shutil.rmtree(self.working_root / public_id, ignore_errors=True)
@@ -572,7 +572,7 @@ class MultiPartUploader:
         if meta.pid != pid:
             raise PsPermissionError()
         working_dir = self.working_root / public_id
-        if meta.status not in {"INIT", "UPLOADING", "ERROR"} or not working_dir.is_dir():
+        if meta.status not in {"INIT", "UPLOADING"} or not working_dir.is_dir():
             raise PsFileStatusInvalidError()
         upload = self._getUploadMeta(public_id)
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count < upload.total_chunks:
@@ -585,8 +585,9 @@ class MultiPartUploader:
         if len(blob) != expected:
             raise PsChunkSizeMismatchError(expected, len(blob))
         if hashlib.sha256(blob).hexdigest().lower() != sha256.lower():
-            self._failed(pid, public_id)
-            raise PsDataCorruotedError()
+            # Recoverable: status and working directory are kept, the client resends this chunk.
+            # Only commit-side failures move the row to ERROR (via _failed).
+            raise PsChunkHashMismatchError(count)
         fd = os.open(working_dir / f"chunk{count}.parts", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as output:
             output.write(blob)

@@ -67,17 +67,18 @@ class Markup(str):
     def format(self, *args: object, **kwargs: object) -> "Markup": ...  # 各引数を escape() してから str.format
     def __repr__(self) -> str: ...            # "Markup('...')"
 
-class AttrSafe(Markup):
-    """escape 済 (引用符も符号化済) で属性値位置にも置ける HTML 断片。safe_url() だけが作る。"""
+class _AttrSafe(Markup):
+    """非公開。escape 済 (引用符も符号化済) で属性値位置にも置ける HTML 断片。
+    生成するのは safe_url() だけ (規約。__all__ に載せない。アプリコードが直接作ってはならない)。"""
     __slots__ = ()
 
 def escape(value: object) -> Markup:
     """Markup / __html__ を持つ値はそのまま。それ以外は str(value) を html.escape(quote=True)。"""
 
-def safe_url(value: object, *, allowed_schemes: tuple[str, ...] = ("http", "https", "mailto")) -> AttrSafe:
+def safe_url(value: object, *, allowed_schemes: tuple[str, ...] = ("http", "https", "mailto")) -> Markup:
     """URL 属性 (href/src/action/formaction) 用。Markup を渡しても信用しない:
-    str(value) → html.unescape で文字参照を復号 → スキーム検査 → 常に escape して AttrSafe で返す。
-    allowlist 外なら AttrSafe("")。"""
+    str(value) → html.unescape で文字参照を復号 → スキーム検査 → 常に escape して _AttrSafe で返す
+    (公開型注釈は Markup)。allowlist 外なら _AttrSafe("")。"""
 
 def json_script(value: object, element_id: str | None = None) -> Markup:
     """JSON を HTML に inline する用。<, >, & を \\u003c \\u003e \\u0026 に置換。
@@ -88,10 +89,23 @@ def json_script(value: object, element_id: str | None = None) -> Markup:
 - `escape()` の規則: `isinstance(value, Markup)` → そのまま。`callable(getattr(value, "__html__", None))` → `Markup(value.__html__())` (markupsafe 等との相互運用)。それ以外 → `Markup(html.escape(str(value), quote=True))`。`None` は `"None"` になる (現行 `str(values[key])` と同じ。黙って空にはしない)
 - `html.escape(quote=True)` の置換: `&`→`&amp;` `<`→`&lt;` `>`→`&gt;` `"`→`&quot;` `'`→`&#x27;`
 - `Markup` で **Markup を返すメソッドは `+` / `join` / `format` の 3 つだけ**。`strip()` / `replace()` / f-string / `%` は素の `str` を返す (その結果をスロットに渡すとエスケープされる)。信頼済みと分かっている結果は呼び出し側が `Markup(...)` で包み直す
-- `AttrSafe(Markup)`: `Markup` のサブクラス。「出力は常に escape 済 (`"` `'` も符号化済) なので属性値位置に置いても境界を壊さない」ことを型で表す。`safe_url()` だけが生成する。本文位置では Markup と同じく素通し、属性値位置 (E-R12) でも素通し
-- `safe_url()` の手順 (Markup 入力も**同じ経路**。素通し分岐は無い): (a) `raw = html.unescape(str(value))` — `jav&#x61;script:` のような文字参照を属性値として復号された形に戻す。(b) `probe = re.sub(r"[\x00-\x20]", "", raw).lower()`、`m = re.match(r"^([a-z][a-z0-9+.\-]*):", probe)`。`m` 無し (相対 URL、`//host/...`、`?q`、`#top`) → 許可。`m` あり → `m.group(1) in allowed_schemes` のときだけ許可。(c) 許可なら `AttrSafe(html.escape(raw, quote=True))` を返し、拒否なら `AttrSafe("")`。`\x00-\x20` を除去してから判定するのは `java\tscript:` / ` JAVASCRIPT:` のようなブラウザが無視する文字の迂回を潰すため。(a) を入れるのは `Markup("jav&#x61;script:alert(1)")` が (b) を素通りして属性で `javascript:` に復号される穴を塞ぐため (Codex 指摘)。戻り値を `AttrSafe` にするのは、E-R12 (属性値位置では Markup も escape) と組んだとき `href="{{ u }}"` が二重エスケープ (`&amp;amp;`) になったため (リリース前ゲート RG07)
-- 読み込み時検査 (E-R6): `ObjectHTML.__init__` が登録する全 `HTMLDoc` の `html` に対して `re.search(r'''(?i)\s(on\w+|srcdoc|style)\s*=\s*("[^"]*|'[^']*)\{\{''', html)` を走らせ、一致したら `TemplateUnsafeSlotError(doc.name, attr)` (OH06) を送出する。**大文字小文字無視** (`ONCLICK=` も検出) で、属性値の走査は**開き引用符と同種の引用符まで** (`"[^"]*` / `'[^']*`。`onclick="if ('x') {{x}}"` のように値の中に異種の引用符があっても止まらない。RG03)。`autoescape` の値に関係なく実行する (テンプレート作者の誤りで、設定で緩める対象ではない)。`ObjectHTMLTemplates` と `ErrorResponse` はどちらも `ObjectHTML(...)` を通るので同じ検査を受ける。偽陽性: 属性名の直前に空白を要求し `data-onx="{{ v }}"` や `title="on{{ v }}"` には一致しない。この 3 種はスロット値の全てがコード (JS / CSS / 文書) として解釈される位置なので、正当な使い方が存在しない
-- 属性値位置の判定 (E-R12): `_apply_slots_strict` の置換時、`html[:m.start()]` を先頭から 1 文字ずつ走査する状態機械で決める — `in_tag=False, quote=None` から始め、`in_tag` でなく `<` を見たら `in_tag=True`、`in_tag` 中に `quote is None` で `"` / `'` を見たら `quote=その文字`、`quote` 中に同じ文字を見たら `quote=None`、`in_tag` 中に `quote is None` で `>` を見たら `in_tag=False`。**スロット開始位置で `in_tag and quote is not None` なら属性値位置**、それ以外は本文位置。属性値位置では **Markup でも `html.escape(str(value), quote=True)`** する (`AttrSafe` だけは素通し)。「直前が `="`」の判定では `<div title="prefix {{x}}">` が本文扱いになりネストした Markup が素通しした (RG02) ので、タグ全体を見る方式に置換。誤判定は escape 側に倒れる (本文中の `<` と `"` が対で現れる珍しい文脈で過剰エスケープになるだけ)。Insert 由来 (`_apply_slots_non_strict`) はこの判定を行わない (E-R2)
+- `_AttrSafe(Markup)`: 非公開の `Markup` サブクラス。「出力は常に escape 済 (`"` `'` も符号化済) なので属性値位置に置いても境界を壊さない」ことを型で表す。**規約: 生成するのは `safe_url()` だけ**。`nexom.app` / `nexom.app.template` の `__all__` に載せず、ドキュメントにも「アプリは `safe_url()` を呼ぶ」とだけ書く (Codex 第 2 パス RG07: 直接コンストラクタを呼べば属性注入になるが、通常文字列・render 結果・`+`/`join`/`format` から自動で昇格する経路は無いことを同パスで確認済)。本文位置では Markup と同じく素通し、属性値位置 (E-R12) でも素通し
+- `safe_url()` の手順 (Markup 入力も**同じ経路**。素通し分岐は無い): (a) `raw = html.unescape(str(value))` — `jav&#x61;script:` のような文字参照を属性値として復号された形に戻す。(b) `probe = re.sub(r"[\x00-\x20]", "", raw).lower()`、`m = re.match(r"^([a-z][a-z0-9+.\-]*):", probe)`。`m` 無し (相対 URL、`//host/...`、`?q`、`#top`) → 許可。`m` あり → `m.group(1) in allowed_schemes` のときだけ許可。(c) 許可なら `_AttrSafe(html.escape(raw, quote=True))` を返し、拒否なら `_AttrSafe("")`。`\x00-\x20` を除去してから判定するのは `java\tscript:` / ` JAVASCRIPT:` のようなブラウザが無視する文字の迂回を潰すため。(a) を入れるのは `Markup("jav&#x61;script:alert(1)")` が (b) を素通りして属性で `javascript:` に復号される穴を塞ぐため (Codex 指摘)。戻り値を `_AttrSafe` にするのは、E-R12 (属性値位置では Markup も escape) と組んだとき `href="{{ u }}"` が二重エスケープ (`&amp;amp;`) になったため (リリース前ゲート第 1 パス RG07)
+- **スロット位置の分類 — HTML トークナイザ** (E-R6 の読み込み時検査と E-R12 の属性値判定の両方がこれ 1 つを使う。正規表現検出と「直近の `<` からの状態機械」は Codex 第 2 パスで `<div title="a < {{x}}">` / `title="a <!-- {{x}}"` (引用符内の `<` でリセット、RG02) と `<p/onclick="{{x}}">` / `<iframe/srcdoc=` (`/` 区切り、RG03) に迂回されたので廃止)。`_classify_slots(html: str) -> list[SlotInfo]` (`SlotInfo = (start: int, state: str, attr: str | None, tag: str | None)`) が**テンプレート全体を先頭から 1 パス**で走査し、各 `{{ slot }}` の開始位置にいた状態を記録する:
+
+  | 状態 | 入る条件 | 出る条件 |
+  |---|---|---|
+  | `DATA` | 初期状態 | `<!--` → COMMENT。`<` の直後が英字 / `/` / `!` / `?` **または `{{` (スロット)** → TAG_OPEN (それ以外の `<` は文字のまま) |
+  | `COMMENT` | `<!--` | `-->` → DATA。中の `<` `>` `"` は無視 |
+  | `TAG_OPEN` | `<` の直後 | タグ名文字 (英数 `-` `:` `!` `?`、先頭だけ `/`) を読み、それ以外で IN_TAG |
+  | `IN_TAG` | タグ名の後 | **空白と `/` が属性の区切り** (`<p/onclick=` を属性として読む)。属性名文字を溜め、`=` を見たら後続の空白を飛ばして `"` → ATTR_VALUE_DQ、`'` → ATTR_VALUE_SQ、それ以外 → ATTR_VALUE_UNQUOTED。`=` の前の空白で属性名は捨てない (`onmouseover = "…"` の属性名は `onmouseover`)。`>` → タグ名が `script` / `style` (大文字小文字無視、開始タグ、自己終了 `/>` でない) なら RAWTEXT、それ以外 DATA |
+  | `ATTR_VALUE_DQ` / `_SQ` | `="` / `='` | 開き引用符と**同種**の引用符 → IN_TAG。**中の `<` `<!--` `>` `/` と異種の引用符は状態を変えない** |
+  | `ATTR_VALUE_UNQUOTED` | `=` の後が引用符以外 | 空白 → IN_TAG、`>` → IN_TAG に戻してから `>` を処理 |
+  | `RAWTEXT` | `<script…>` / `<style…>` の直後 | `</script\s*>` / `</style\s*>` (大文字小文字無視) → DATA。中の `<` `{{` `"` は状態を変えない |
+
+  各スロットに記録する `attr` は IN_TAG で最後に溜めた属性名の小文字、`tag` は直近のタグ名の小文字。
+- 読み込み時検査 (E-R6 / E-R8): `ObjectHTML.__init__` が登録する全 `HTMLDoc` について `_classify_slots(doc.html)` を取り、次のいずれかのスロットがあれば `TemplateUnsafeSlotError(doc.name, reason)` (OH06) を送出する。(a) `state in {ATTR_VALUE_DQ, ATTR_VALUE_SQ}` かつ `attr` が `^(on\w+|srcdoc|style)$` に一致 (reason = 属性名)。(b) `state == ATTR_VALUE_UNQUOTED` (reason `"unquoted attribute"`)。(c) `state == RAWTEXT` (reason `"script/style body"` — **script / style 本文内のスロットは読み込み時に拒否**。第 2 パスで「非対応かつ安全でない」から「拒否」に強めた)。(d) `state in {IN_TAG, TAG_OPEN}` (reason `"tag/attribute name position"`)。(e) `state == COMMENT` (reason `"comment"`)。許されるのは `DATA` と、(a) に当たらない `ATTR_VALUE_DQ/SQ` だけ。`autoescape` の値に関係なく実行する (テンプレート作者の誤りで、設定で緩める対象ではない)。`ObjectHTMLTemplates` と `ErrorResponse` はどちらも `ObjectHTML(...)` を通るので同じ検査を受ける。偽陽性: 属性名の完全一致なので `data-onx="{{ v }}"` / `title="on{{ v }}"` は通る。`<script src="{{ s }}">` は `src` 属性 (ATTR_VALUE_DQ) なので通る (RAWTEXT に入るのは `>` の後)
+- 属性値位置の判定 (E-R12): `_apply_slots_strict` は同じ `_classify_slots` の結果 (`ObjectHTML.__init__` で doc ごとに 1 回計算してキャッシュ。ただし `_render_structure` が Extends / Import で合成した HTML に対しては置換直前に 1 回計算する) を参照し、**スロットの `state` が `ATTR_VALUE_DQ` / `ATTR_VALUE_SQ` なら属性値位置**として **Markup でも `html.escape(str(value), quote=True)`** する (`_AttrSafe` だけは素通し)。`DATA` なら本文位置で Markup 素通し。他の状態はここに来る前に OH06 で落ちている。Insert 由来 (`_apply_slots_non_strict`) はこの判定を行わない (E-R2)。トークナイザは HTML 仕様の簡約版なので誤分類は「本文を属性値と見る」側 (= 過剰エスケープ) にしか倒れない — 引用符内で状態が変わらないこと、RAWTEXT が終了タグまで続くことが、その保証の核
 - `json_script()` の `element_id` は `^[A-Za-z0-9_-]+$` に一致しなければ `ValueError`。JSON 化は `json.dumps(value, ensure_ascii=False)` → 3 文字置換 → `Markup`
 
 ### 4.2 エンジンのシグネチャ
@@ -115,12 +129,12 @@ class ObjectHTMLTemplates:
 | E-R3 | `render()` の戻り値は `Markup`。**ネストした render の結果を別の render のスロットに渡すと素通し**。`"\n".join(list_of_markup)` は `str` に落ちるので `Markup("\n").join(...)` を使う |
 | E-R4 | `HtmlResponse(body)` / `Response(body)` は body を一切加工しない (Markup でも str でも bytes にするだけ)。「レンダ済み出力は Raw」= 応答 body に escape は掛からない、の意味。エスケープは常にスロット埋め込み時の 1 回だけ |
 | E-R5 | スロット値は**再展開されない** (置換後の文字列に `{{ x }}` が含まれていても 2 回目の置換は起きない。`re.sub` 1 パス) |
-| E-R6 | E-R1 で安全なのは **テキストコンテキスト** (`<p>{{ x }}</p>`) と、**引用符付きの通常テキスト属性** (`alt` / `title` / `value` / `placeholder` / `content` / `aria-*` / `data-*` 等、値が文字列としてだけ扱われる属性) の 2 つ。安全でない属性: (a) URL 属性 `href` / `src` / `action` / `formaction` / `poster` 等 → `javascript:` を escape では止められないので **`safe_url()` 必須** (E-R7)。(b) **`on*` (イベントハンドラ) / `srcdoc` / `style` は禁止** — 値が JS / HTML 文書 / CSS として解釈され、エスケープでは守れない。`ObjectHTML` はテンプレート読み込み時に `\s(on\w+|srcdoc|style)\s*=\s*["'][^"']*\{\{` を検出して `TemplateUnsafeSlotError` (OH06) を投げる。(c) **引用符なし属性 (`<a title={{ x }}>`) は非対応** (空白で脱出できる)。属性スロットは必ず `"…"` で囲む |
-| E-R7 | URL 属性にユーザ由来値を入れるときは `safe_url(value)` を通す。`safe_url` は Markup 入力も信用せず、文字参照を復号してからスキーム検査し、常に escape して **`AttrSafe`** で返す (§4.1)。`AttrSafe` は属性値位置でも素通しなので `href="{{ u }}"` に渡しても二重エスケープにならない |
-| E-R8 | **`<script>` 本文内のスロットは非対応かつ安全でない**。`<script>let x={{ x }}</script>` に `alert(1)` を渡すとエスケープ対象文字が無いためそのまま `let x=alert(1)` になり実行される (E29)。JS に値を渡すときは `json_script(data, element_id="boot")` で `<script type="application/json">` を出し、JS 側で `JSON.parse(document.getElementById("boot").textContent)` する。`json_script` の出力を `innerHTML` に代入する用途は守らない |
+| E-R6 | E-R1 で安全なのは **テキストコンテキスト** (`<p>{{ x }}</p>`) と、**引用符付きの通常テキスト属性** (`alt` / `title` / `value` / `placeholder` / `content` / `aria-*` / `data-*` 等、値が文字列としてだけ扱われる属性) の 2 つ。安全でない属性: (a) URL 属性 `href` / `src` / `action` / `formaction` / `poster` 等 → `javascript:` を escape では止められないので **`safe_url()` 必須** (E-R7)。(b) **`on*` (イベントハンドラ) / `srcdoc` / `style` は禁止** — 値が JS / HTML 文書 / CSS として解釈され、エスケープでは守れない。`ObjectHTML` はテンプレート読み込み時に §4.1 のトークナイザで属性名を特定し `TemplateUnsafeSlotError` (OH06) を投げる (`<p/onclick=` の `/` 区切り、`ONCLICK` の大文字も検出)。(c) **引用符なし属性 (`<a title={{ x }}>`)、タグ名 / 属性名位置 (`<{{ t }}>`、`<p {{ a }}>`)、コメント内は読み込み時に拒否** (OH06)。属性スロットは必ず `"…"` で囲む |
+| E-R7 | URL 属性にユーザ由来値を入れるときは `safe_url(value)` を通す。`safe_url` は Markup 入力も信用せず、文字参照を復号してからスキーム検査し、常に escape して非公開型 **`_AttrSafe`** で返す (§4.1)。`_AttrSafe` は属性値位置でも素通しなので `href="{{ u }}"` に渡しても二重エスケープにならない。**`_AttrSafe` を生成するのは `safe_url()` だけ** (規約。アプリコードが `_AttrSafe(...)` を直接呼ぶのは契約違反で、属性注入になる) |
+| E-R8 | **`<script>` / `<style>` 本文内のスロットは読み込み時に拒否** (OH06、§4.1 トークナイザの RAWTEXT)。理由: `<script>let x={{ x }}</script>` に `alert(1)` を渡すとエスケープ対象文字が無いためそのまま `let x=alert(1)` になり実行される (E29)。`<script src="{{ s }}">` のような属性は RAWTEXT ではなく属性値位置なので通る (URL なので `safe_url()`)。JS に値を渡すときは `json_script(data, element_id="boot")` で `<script type="application/json">` を出し、JS 側で `JSON.parse(document.getElementById("boot").textContent)` する。`json_script` の出力を `innerHTML` に代入する用途は守らない |
 | E-R9 | `ObjectHTML(autoescape=False)` / `ObjectHTMLTemplates(autoescape=False)` で従来挙動 (全スロット素通し) に戻せる。移行猶予用。雛形は使わない。E-R6 (b) の読み込み時検査は `autoescape=False` でも走る |
 | E-R10 | `ErrorResponse(status, message)` は `_render` で `escape(str(message))` を呼ぶ — `str()` で Markup 性を剥がしてから `escape()` に渡すので、`Markup` を渡しても常にエスケープされる (`escape()` 自体の「Markup は素通し」規則とは矛盾しない) |
-| E-R12 | **Markup の素通しは要素本文位置のみ**。スロットが引用符付き属性値位置 (そのスロットが属するタグ内で引用符が閉じていない、§4.1 の状態機械) にあるときは Markup でも escape する。**ただし `AttrSafe` (= `safe_url()` の戻り値) は属性値位置でも素通し** (出力が既に引用符まで符号化済だから)。ネストした `render()` 出力には生の `"` が含まれ得るので、属性値に Markup を入れると境界を壊すため。誤判定は escape 側に倒れる |
+| E-R12 | **Markup の素通しは要素本文位置 (`DATA`) のみ**。スロットが引用符付き属性値位置 (§4.1 トークナイザの `ATTR_VALUE_DQ` / `_SQ`) にあるときは Markup でも escape する。**ただし `_AttrSafe` (= `safe_url()` の戻り値。アプリは直接生成しない) は属性値位置でも素通し** (出力が既に引用符まで符号化済だから)。ネストした `render()` 出力には生の `"` が含まれ得るので、属性値に Markup を入れると境界を壊すため。誤判定は escape 側に倒れる |
 | E-R11 | HTTP-15: テンプレート名が `ObjectHTML` のクラス属性名 (`render`, `lib`, `_set_doc` 等) と衝突するか `_` で始まる場合、動的属性 (`engine.<name>()`) は**作らない**。`render("<name>")` は従来どおり動く。例外は投げない |
 
 ### 4.4 雛形への適用
@@ -307,7 +321,7 @@ class Redirect(Response):
     ) -> None
 ```
 
-前段の拒否 (`allow_external` に**関わらず**): `loc` が空、または先頭文字が ASCII `0x21` 未満 (空白・タブ・制御文字) なら `ResponseRedirectExternalError` (RS02)。ブラウザは Location の先頭空白を除去してから解釈するので ` /\evil.example` が外部になる (RG04)。先頭以外の空白はヘッダ値検証 (§6.3) の範囲 (`\t` と空白は通る)。
+前段の拒否 (`allow_external` に**関わらず**): `loc` が空、**先頭が空白 (`0x20`)**、または **`loc` のどこかに ASCII `0x00`〜`0x1F` / `0x7F` が含まれる** なら `ResponseRedirectExternalError` (RS02)。WHATWG URL パーサは TAB / LF / CR を位置に関係なく除去してから解釈するので `/\t\evil.example` が `https://evil.example/` に解決される (Codex 第 2 パス RG04 で実機確認)。先頭空白も除去されるので ` /\evil` が外部になる。先頭以外の空白 (`/a b`) は通る。
 
 ローカル判定 `_is_local_location(loc)` (全部 True で「ローカル」):
 1. `loc` が空でない、かつ先頭が `\` でない
@@ -653,13 +667,14 @@ class CookieInvalidValueError(NexomError):             # 既存 "C01" (name / va
 class CookieInvalidAttributeError(NexomError):         # "C02"  def __init__(self, name: str, detail: str)
 
 # ObjectHTML
-class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(self, doc_name: str, attr: str)
-    # message f"Slot inside unsafe attribute '{attr}' in template '{doc_name}'. Use json_script()/safe_url() or move the value out of the attribute."
+class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(self, doc_name: str, reason: str)
+    # reason は属性名 ("onclick" / "srcdoc" / "style" …) または位置種別 ("unquoted attribute" / "script/style body" / "tag/attribute name position" / "comment")
+    # message f"Unsafe slot position ({reason}) in template '{doc_name}'. Use json_script()/safe_url() or move the slot to element body / quoted text attribute."
 ```
 
 ## 16. 公開 API (`app/__init__.py`)
 
-追加 export: `Markup`, `AttrSafe`, `escape`, `safe_url`, `json_script` (from `.template` 経由で `core.object_html_render` を再 export)、`CORSMiddleware`、`client_ip`、`File`。`__all__` にも追加。削除なし。G10 の import 列に `AttrSafe` を含める。
+追加 export: `Markup`, `escape`, `safe_url`, `json_script` (from `.template` 経由で `core.object_html_render` を再 export)、`CORSMiddleware`、`client_ip`、`File`。`__all__` にも追加。削除なし。**`_AttrSafe` は非公開** — `nexom.app` / `nexom.app.template` から import させず `__all__` にも載せない (`core.object_html_render` 内の名前としてだけ存在。E27c で確認)。
 
 ---
 
@@ -699,10 +714,11 @@ class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(se
 | E26 | `ObjectHTML(HTMLDoc("t", '<a title="{{ v }}">x</a>')).render("t", v=Markup('y" onmouseover="alert(1)'))` | `<a title="y&quot; onmouseover=&quot;alert(1)">x</a>` (属性値位置では Markup でも escape、E-R12)。同じ Markup を `<p>{{ v }}</p>` に渡すと `<p>y" onmouseover="alert(1)</p>` (本文位置は素通し、E4 と同じ) |
 | E27 | `'<a title = \'{{ v }}\'>'` (`=` の前後に空白、単引用符) に `v=Markup('<b>')` | `title = '&lt;b&gt;'` (空白を挟んでも属性値位置と判定)。`'<p data-x="a" {{ v }}>'` (引用符は閉じている = 属性名位置) に `Markup("<b>")` → 素通し (本文扱い。属性名位置へのスロットは E-R6 (c) で非対応) |
 | E27b | `'<div title="prefix {{ x }}">'` に `x=Markup('y" onmouseover="alert(1)')` | `<div title="prefix y&quot; onmouseover=&quot;alert(1)">` (スロットの直前が `="` でなくても、タグ内で引用符が開いていれば属性値位置。RG02 の再発防止)。`'<a title="a>b {{ v }}">'` に `Markup("<b>")` → `title="a>b &lt;b&gt;"` (引用符内の `>` ではタグを閉じない)。`'<a href="x">{{ v }}</a>'` に `Markup("<b>")` → `<a href="x"><b></a>` (タグが `>` で閉じた後は本文位置) |
-| E27c | `'<a href="{{ u }}">'` に `u=safe_url("/?a=1&b=2")` | `<a href="/?a=1&amp;b=2">` (`&amp;` は **1 回だけ**。`AttrSafe` は属性値位置でも素通し。RG07 の再発防止)。同じテンプレに `u=Markup("/?a=1&b=2")` (safe_url を通さない Markup) → `href="/?a=1&amp;b=2"` (Markup は属性値位置で escape されるので結果は同じだが、`u=Markup('x" onclick="a')` なら `&quot;` に符号化される)。`isinstance(safe_url("/x"), AttrSafe) and isinstance(safe_url("/x"), Markup)` → True |
+| E27c | `'<a href="{{ u }}">'` に `u=safe_url("/?a=1&b=2")` | `<a href="/?a=1&amp;b=2">` (`&amp;` は **1 回だけ**。`_AttrSafe` は属性値位置でも素通し。RG07 の再発防止)。同じテンプレに `u=Markup("/?a=1&b=2")` (safe_url を通さない Markup) → `href="/?a=1&amp;b=2"` (Markup は属性値位置で escape されるので結果は同じだが、`u=Markup('x" onclick="a')` なら `&quot;` に符号化される)。`isinstance(safe_url("/x"), Markup)` → True、`type(safe_url("/x")).__name__ == "_AttrSafe"`、`"_AttrSafe" not in nexom.app.__all__` かつ `not hasattr(nexom.app, "AttrSafe")` |
 | E28 | `ObjectHTML(HTMLDoc("t", '<div onclick="{{ h }}">'))`、`'<div style="color:{{ c }}">'`、`"<iframe srcdoc='{{ d }}'>"`、`'<div  onmouseover = "x{{ h }}">'`、**`'<div ONCLICK="{{ x }}">'`** (大文字)、**`'<div onclick="if (\'x\') {{ x }}">'`** (値の中に異種引用符) | いずれも構築時に `TemplateUnsafeSlotError` (OH06、`.code == "OH06"`、メッセージに属性名を含む)。`ObjectHTMLTemplates(dir)` でも同じ (ディレクトリに該当 html を置く)。`autoescape=False` でも投げる。一方 `'<div data-onx="{{ v }}">'`、`'<p title="on{{ v }}">'`、`'<a href="{{ u }}">'` は例外なし |
-| E29 | `ObjectHTML(HTMLDoc("t", "<script>let x={{ x }}</script>")).render("t", x="alert(1)")` | `<script>let x=alert(1)</script>` — **エスケープ対象文字が無いので実行可能なまま出る**。これが E-R8「script 本文内は非対応かつ安全でない」の根拠。Reviewer は本 doc §4.3 E-R8 と `ObjectHTML` の docstring にこの例が書かれていることを確認する (出力文字列を固定する回帰テストは書かない: 将来 script 内検出を足したとき意味が変わる) |
-| E30 | `safe_url(Markup("jav&#x61;script:alert(1)"))` → `AttrSafe("")` (文字参照を復号してから判定)。`safe_url(Markup("https://a/x"))` → `AttrSafe("https://a/x")`。`safe_url("https://a/?x=1&amp;y=2")` → `AttrSafe("https://a/?x=1&amp;y=2")` (復号 → `&y=2` → 再 escape)。`safe_url('https://a/?q="')` → `AttrSafe("https://a/?q=&quot;")`。E18〜E20 の戻り値型も全て `AttrSafe` (値は不変) | |
+| E29 | `ObjectHTML(HTMLDoc("t", "<script>let x={{ x }}</script>"))`、`'<script>var a = {{x}}</script>'`、`'<SCRIPT>{{x}}</SCRIPT>'`、`'<style>p{color:{{c}}}</style>'` | いずれも構築時に `TemplateUnsafeSlotError` (OH06、メッセージに `script/style body`)。理由: 通せば `let x=alert(1)` が実行可能なまま出る (エスケープ対象文字が無い)。一方 `'<script src="{{ s }}"></script><p>{{ y }}</p>'` は例外なし (`src` は属性値位置、`{{ y }}` は終了タグ後の DATA)、`'<script></script>{{x}}'` も例外なし |
+| E31 | Codex 第 2 パスの迂回例: `'<div title="a < {{ x }}">'` と `'<div title="a <!-- {{ x }}">'` に `x=Markup(' onmouseover="alert(1)" ')` | いずれも `title="a &lt; …"` / `title="a &lt;!-- …"` の形で `onmouseover=&quot;alert(1)&quot;` に escape される (引用符内の `<` / `<!--` で属性値位置の判定がリセットされない。RG02)。同じ x を `'<a title="a <span {{ x }}">'` に渡しても escape。`'<p/onclick="{{ x }}">'`、`'<iframe/srcdoc="{{ x }}">'` → 構築時 OH06 (`/` を属性区切りとして読む。RG03)。`'<{{ t }}>'`、`'<p {{ a }}>'` → OH06 (`tag/attribute name position`)。`'<!-- {{ x }} -->'` → OH06 (`comment`)。`'<a title={{ x }}>'` → OH06 (`unquoted attribute`) |
+| E30 | `safe_url(Markup("jav&#x61;script:alert(1)"))` → `""` (文字参照を復号してから判定)。`safe_url(Markup("https://a/x"))` → `"https://a/x"`。`safe_url("https://a/?x=1&amp;y=2")` → `"https://a/?x=1&amp;y=2"` (復号 → `&y=2` → 再 escape)。`safe_url('https://a/?q="')` → `"https://a/?q=&quot;"`。戻り値の型は全て `_AttrSafe` (E18〜E20 も同じ。文字列値は不変) | |
 
 ### 17.2 Cookie (K)
 
@@ -750,6 +766,7 @@ class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(se
 | R5 | `Redirect("/x", status=308)` → 308; `Redirect("/x", status=200)` → `ValueError` | |
 | R6 | `Redirect("next")`, `Redirect("?a=1")`, `Redirect("/x?u=https://ok")` | 通る (ローカル) |
 | R7 | `Redirect(" /\\evil.example")` (先頭空白)、`Redirect("\t/next")`、`Redirect("")` | RS02。**`allow_external=True` を付けても RS02** (`Redirect(" https://x", allow_external=True)` も RS02) |
+| R9 | `Redirect("/\\t\\\\evil.example")` (途中 TAB、Python リテラル `"/\t\\evil.example"`)、`Redirect("/ne\\x7fxt")`、`Redirect("/a\\nb")`、`Redirect("https://ok.example/\\tx", allow_external=True)` | いずれも RS02 (制御文字は位置に関係なく拒否。`allow_external=True` でも) |
 | R8 | `Redirect("/a b")` (先頭以外の空白) | 通る (`Location: /a b`。ヘッダ値検証は空白を許す) |
 
 ### 17.4 Request (Q)
@@ -924,7 +941,7 @@ grep 元: `Developments/Projects/aisaba_platform 2/services/**` (2026-10-21、HE
 - `LogoutPage` の `Redirect(redirect_url)`: Referer が `//evil` だと RS02 で 500 になる。固定 `/` か allowlist へ (AUTH-14 と同時に)
 - `ErrorResponse(500, str(e))` (`:138`) は E-R10 でエスケープされるので XSS は消えるが、例外文字列をユーザに見せない方針なら定数へ
 - `assets/auth/wsgi.py`: §14.2 と同じ構造にし、`client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)` と `sanitize_log_field` を使う。auth 側 `config.py` には `TRUSTED_PROXY_COUNT: int = __g_trusted_proxies__` と書く — build.py (§14.6) が `0` (または `--auth-trusted-proxy-count` の明示値) で埋める。**処理順は §14.2「処理順の契約」どおり: `allowed_clients` ガード (REMOTE_ADDR のみ) → `Request()` 構築を try 内で (`RequestParseError` → 400) → `service.handler`** (RG08: `CONTENT_LENGTH=abc` が 500 になっていた)。`Request.__init__` が cookie で例外を投げなくなる (Q-R8) ので AUTH-12 の片側は本 doc で閉じる
-- `login.html:150` / `signup.html:220` の `const PAGE_PATH = "/{{ page_path }}"`: 値 `user/login` は不変。将来 `{arg}` 付きにするなら `json_script` へ (E-R8)
+- **`login.html:150` / `signup.html:220` の `const PAGE_PATH = "/{{ page_path }}"` は `<script>` 本文内のスロットなので、1.2.0 では `_OHTML = ObjectHTML(...)` の構築時に OH06 で落ちる (E-R8 / E29、`templates/auth.py` の import 時)。auth doc 側で必ず書き換える**: 例 `<form id="auth" data-page-path="/{{ page_path }}">` にして JS で `document.getElementById("auth").dataset.pagePath` を読む (通常テキスト属性なので E-R6 で安全)、または `json_script({"page_path": ...}, element_id="boot")`。`test_auth_pages_login_get` はこの書き換え後に通る
 - `AuthPages._handler` の `self.routing.get(req.path)` は method 無し呼び出しなので §12 の変更を受けない (M7)。`LoginPage` 等は `methods=None` なので OPTIONS/HEAD も handler に届く (従来どおり)
 
 ### storage doc (`core/log.py`, `pyproject.toml`, `parallel_storage.py`) — storage-hardening doc §9 からの要求 4 件への回答
@@ -945,7 +962,7 @@ grep 元: `Developments/Projects/aisaba_platform 2/services/**` (2026-10-21、HE
 
 1. **`markupsafe` を依存に追加**: pyproject は storage doc 所有 + Touri の「標準部品で足りる所に依存を増やさない」方針。必要なのは `__html__` / `escape` / `join` / `format` だけで 40 行で済む。`__html__` プロトコルは互換にしたので後から差し替えも可能
 2. **`autoescape` を opt-in (既定 False) にして次メジャーで反転** (Researcher の段階導入案): Leader 方針 1 (1.2.0 で破壊的変更を許容) に反する。aisaba 本番の XSS が実証済なので既定 True。`autoescape=False` は猶予用に残す
-3. **コンテキスト自動判別 (属性内か script 内かをパーサで検出して escape 方式を変える)**: ObjectHTML は正規表現 1 パスの置換器で HTML パーサを持たない。判別器を足すと誤判定が新しい穴になる。「引用符付き属性 + テキストのみ対応、URL は `safe_url`、JS は `json_script`」の契約で代替
+3. **コンテキストごとに escape 方式を変える (属性なら属性用、JS なら JS 文字列用、CSS なら CSS 用)**: 当初は「判別器を足すと誤判定が新しい穴になる」としてコンテキスト判別そのものを不採用にしたが、Codex 第 1・第 2 パスで正規表現と局所的な状態機械が計 4 通り迂回され、**判別しない方が穴になる**と確定した。そこで **テンプレート全体を 1 パスで走査する HTML トークナイザによる位置分類は採用** (§4.1) し、その使い方を「拒否 (OH06) と属性値位置での Markup escape の判定」に限定した。escape 方式は `html.escape(quote=True)` 1 種類のまま変えない — JS / CSS / URL 用のエスケープを足すと「どの方式が当たるか」がトークナイザの精度に依存し、精度の穴がそのまま注入になる。拒否なら誤分類は「正当なテンプレートが起動時に落ちる」(気付ける) 側にしか倒れない
 4. **テンプレート読み込み時のスロット位置検査を全属性に広げる (引用符なし属性 `attr={{ x }}`、`<script>` 内、全 URL 属性)**: 引用符なし属性や script 内は正規表現では `<pre>` 内テキストや `a={{ b }}` と区別できず偽陽性で既存テンプレートを落とす。URL 属性は `safe_url()` を通した正当なスロットと区別できない。**`on*` / `srcdoc` / `style` の 3 種に限っては値が丸ごとコードとして解釈される位置で正当な使い方が無く偽陽性が実質ゼロなので、この限定形だけ採用した** (E-R6 (b)、`TemplateUnsafeSlotError`。Codex 第二見解 2026-10-21)。残りは規約 (E-R6 (a)(c)、E-R8) + Reviewer の E2/E3/E29 で代替
 5. **CSP に `default-src 'self'` / `script-src 'self'` を既定で付ける**: 雛形の `login.html` / `signup.html` が inline `<script>`、`error.html` が inline `<style>` + Google Fonts `@import` で、既定を付けると雛形自身が壊れる。`'unsafe-inline'` を付けた CSP は XSS 緩和として機能しない。`frame-ancestors / base-uri / object-src` だけは inline script と無関係に効くので既定に採用し、スクリプト制限は opt-in
 6. **セキュリティヘッダを wsgi 雛形 / middleware で付与**: middleware は `Router.handle` 内の Path 一致時しか走らず、wsgi 雛形の `except` 経路や aisaba の既存 wsgi.py (雛形を更新しない限り) には効かない。`Response.__init__` が唯一全応答を通る点
@@ -970,7 +987,7 @@ grep 元: `Developments/Projects/aisaba_platform 2/services/**` (2026-10-21、HE
 | 順 | ファイル | 変更 |
 |---|---|---|
 | 1 | `core/error.py` | `NexomError.http_status`、P05 / RQ01 / RQ02 / RS01 / RS02 / C02 / OH06 追加、`PathNotFoundError.http_status = 404` |
-| 2 | `core/object_html_render.py` | `Markup` / `AttrSafe(Markup)` / `escape` / `safe_url` (unescape → 検査 → 常に escape → `AttrSafe`) / `json_script`、`ObjectHTML(autoescape)`、`__init__` の `on*`/`srcdoc`/`style` スロット検査 (OH06、大文字小文字無視・同種引用符まで走査)、`render → Markup`、`_apply_slots_strict` のエスケープ + タグ内引用符の状態機械で属性値位置なら Markup も escape (`AttrSafe` は素通し)、`_set_doc` の予約名スキップ |
+| 2 | `core/object_html_render.py` | `Markup` / `_AttrSafe(Markup)` (非公開) / `escape` / `safe_url` (unescape → 検査 → 常に escape → `_AttrSafe`) / `json_script`、`_classify_slots` HTML トークナイザ (DATA / TAG_OPEN / IN_TAG / ATTR_VALUE_DQ / _SQ / _UNQUOTED / COMMENT / RAWTEXT)、`ObjectHTML(autoescape)`、`__init__` の OH06 検査 (unsafe 属性 / unquoted / RAWTEXT / IN_TAG・TAG_OPEN / COMMENT)、`render → Markup`、`_apply_slots_strict` のエスケープ + ATTR_VALUE なら Markup も escape (`_AttrSafe` は素通し)、`_set_doc` の予約名スキップ |
 | 3 | `app/template.py` | `autoescape` 引き渡し、戻り値 Markup、再 export |
 | 4 | `app/response.py` | §6 / §7 / `ErrorResponse(headers, escape, charset)` |
 | 5 | `app/cookie.py` | §5 (`Cookie` 全面、`RequestCookies.__init__` をマッピング受けに) |

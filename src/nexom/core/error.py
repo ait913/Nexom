@@ -220,11 +220,15 @@ class ObjectHTMLTypeError(NexomError):
 class TemplateUnsafeSlotError(NexomError):
     """Raised when a slot appears inside an unsafe HTML attribute."""
 
-    def __init__(self, doc_name: str, attr: str) -> None:
+    # reason: attribute name ("onclick" / "srcdoc" / "style" ...) or a position kind
+    # ("unquoted attribute" / "script/style body" / "tag/attribute name position" / "comment").
+    def __init__(self, doc_name: str, reason: str) -> None:
+        self.reason: str = reason
         super().__init__(
             "OH06",
-            f"Slot inside unsafe attribute '{attr}' in template '{doc_name}'. "
-            "Use json_script()/safe_url() or move the value out of the attribute.",
+            f"Unsafe slot position ({reason}) in template '{doc_name}'. "
+            "Use json_script()/safe_url() or move the slot to element body / "
+            "quoted text attribute.",
         )
 
 
@@ -507,3 +511,10 @@ class PsTooManyActiveUploadsError(NexomError):
     """Raised when the active upload limit is reached."""
     def __init__(self, limit: int) -> None:
         super().__init__("PS16", f"Too many active uploads. limit={limit}")
+
+
+class PsChunkHashMismatchError(NexomError):
+    """Raised when a single chunk's sha256 differs (recoverable by resending the chunk)."""
+    def __init__(self, count: int) -> None:
+        self.count: int = count
+        super().__init__("PS17", f"Chunk sha256 mismatch. count={count}")

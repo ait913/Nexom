@@ -25,6 +25,7 @@ from nexom.app.auth import AuthDBM, AuthPolicy, AuthService
 from nexom.app.parallel_storage import MultiPartUploader
 from nexom.app.response import Redirect, Response
 from nexom.core.error import (
+    AuthInvalidCredentialsError,
     AuthInvalidFieldError,
     PsChunkSizeMismatchError,
     ResponseRedirectExternalError,
@@ -54,6 +55,14 @@ def _insert_legacy(db_path: str, user_id: str, pw: str) -> str:
 
 
 # ---------------------------------------------------------------- RG01
+def verifier_sessions(db: str, uid: str) -> int:
+    con = sqlite3.connect(db)
+    try:
+        return con.execute("SELECT COUNT(*) FROM sessions WHERE uid=? AND revoked_at IS NULL", (uid,)).fetchone()[0]
+    finally:
+        con.close()
+
+
 def test_RG01_login_rehash_does_not_clobber_concurrent_password_change(tmp_path):
     db, log = str(tmp_path / "a.db"), str(tmp_path / "a.log")
     old_pw, new_pw = "legacy-pass-9", "brand-new-pass-1"
@@ -72,8 +81,12 @@ def test_RG01_login_rehash_does_not_clobber_concurrent_password_change(tmp_path)
         return h
 
     svc.dbm._hash_password = racing_hash
-    svc.dbm.login("legacy_bob", old_pw, client_ip="127.0.0.1", user_agent=None, ttl_sec=60)
+    # Round 3 (RG01 residual): the stale verification must not issue a session either.
+    # The credentials are re-read inside the session-issuing transaction -> A03.
+    with pytest.raises(AuthInvalidCredentialsError):
+        svc.dbm.login("legacy_bob", old_pw, client_ip="127.0.0.1", user_agent=None, ttl_sec=60)
     assert fired["n"] == 1, "race hook did not fire (login did not rehash)"
+    assert verifier_sessions(db, uid) == 0, "session issued from a stale verification"
 
     verifier = AuthDBM(db, policy=_fast())
     row = verifier.execute("SELECT password_hash,password_salt FROM users WHERE uid=?", uid)[0]
