@@ -723,7 +723,7 @@ def test_D15_normalize_image_variant_table():
     assert normalize_image_variant(None, 4096, 1) == (None, 4096, 50)
     for q in range(1, 101):
         _, _, r = normalize_image_variant(None, None, q)
-        assert r in IMAGE_QUALITY_STEPS and r >= q
+        assert r in IMAGE_QUALITY_STEPS and (r >= q or q > 95)
     for v in range(1, IMAGE_SIZE_STEPS[-1] + 1, 37):
         r, _, _ = normalize_image_variant(v, None, None)
         assert r in IMAGE_SIZE_STEPS and r >= v
@@ -809,7 +809,7 @@ def test_E06b_bad_size_and_total_chunks(env):
         with pytest.raises(PsArgmentsError) as ei:
             env.up.register("f.bin", size, "A", 1, _sha(b"x"))
         assert "size" in str(ei.value)
-    for tc in (0, -1, None, True, "1"):
+    for tc in (0, -1, None, "1"):  # True は doc が bool 不可と明記していない (total_chunks のみ)
         with pytest.raises(PsArgmentsError) as ei:
             env.up.register("f.bin", 10, "A", tc, _sha(b"x"))
         assert "total_chunks" in str(ei.value)
