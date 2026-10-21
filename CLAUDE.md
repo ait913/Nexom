@@ -26,7 +26,8 @@ Touri 自作の軽量 Python WSGI フレームワーク。pip (`nexom`) で配�
 
 - ルーティングはクラスベース (`Router(Get(...), Post(...), Static(...))`)。デコレータ方式は採らない (暗黙性を避ける設計思想)
 - セキュリティ修正は **既定を安全側に** (opt-in でなく opt-out)。既存アプリの互換性を壊す変更は設計 doc に移行手順を必ず書く
-- 本リポジトリの main = PyPI の最新版と一致させる (2026-10-21 に 1.1.41 の未コミット差分を取り込んで同期済)
+- 本リポジトリの main = PyPI の最新版と一致させる (2026-10-21 に 1.1.41 の未コミット差分を取り込んで同期済、同日 1.2.0 をリリース)
+- テンプレートの位置分類 (トークナイザ) の WHATWG 仕様差は `.designs/20261021-http-hardening.md` §21-20 の台帳に記録し、1.2.x で扱う。脅威モデル (テンプレートは開発者が書く) を超える追加実装はしない (Touri 裁定 2026-10-21)
 
 ## 主要ワークフロー
 
@@ -40,9 +41,11 @@ venv が無ければ `python3 -m venv .venv; .venv/bin/pip install -e . pytest`�
 
 ### PyPI へリリース
 
-1. `pyproject.toml` の `version` を上げる (`src/nexom/__init__.py` の `__version__` は長年 1.1.0 のまま。揃える扱いは設計で決める)
-2. `python -m build` → `twine upload dist/*` (PyPI 認証は Touri 所有。Leader は実行前に承認を取る)
-3. aisaba 側は各サービスの venv で `pip install -U nexom` → `systemctl restart nexom@<service>`
+1. `pyproject.toml` の `version` を上げる (`__version__` は importlib.metadata で pyproject から取るので触らない)。`CHANGELOG.md` に項を追加
+2. `.venv/bin/python -m build --sdist --wheel --outdir <scratch>/dist` → `.venv/bin/python -m twine check <scratch>/dist/*`
+3. `git push origin main` → `git tag v<version>` → `gh release create v<version> --notes-file <notes>`
+4. `twine upload` は **Touri の PyPI トークンが必要** (ローカルに `~/.pypirc` も keyring も無い)。Touri が `! TWINE_USERNAME=__token__ TWINE_PASSWORD=pypi-... .venv/bin/python -m twine upload <scratch>/dist/*` を実行する
+5. aisaba 側は各サービスの venv で `pip install -U nexom==<version>` → アプリ修正 (移行ガイド) → `systemctl restart nexom@<service>`。順序は **アプリ (AuthClient 利用側) → auth サービス** (auth doc §10.1)
 
 ### aisaba 本番への反映
 
