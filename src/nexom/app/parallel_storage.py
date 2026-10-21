@@ -269,8 +269,7 @@ class ParallelStorage:
     def delete(self, pid: str, public_id: str, *, force: bool = False) -> None:
         """Delete the row, content variants, and upload working directory."""
         meta = self.getMeta(None, public_id)
-        if not force and meta.pid != pid:
-            raise PsPermissionError()
+        self._PSDBM._check_owner(meta, pid, force=force)
         for path in self.contents_dir.glob(f"{meta.contents_id}__PSC_*"):
             if path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
@@ -360,7 +359,7 @@ class ParallelStorageDBM(DatabaseManager):
 
     @staticmethod
     def _check_owner(meta: FileMeta, pid: str, *, force: bool = False) -> None:
-        if not isinstance(pid, str) or not pid:
+        if not force and (not isinstance(pid, str) or not pid):
             raise PsArgmentsError("pid")
         if not force and meta.pid != pid:
             raise PsPermissionError()
@@ -451,7 +450,7 @@ class ParallelStorageDBM(DatabaseManager):
     def count_active(self, pid: str) -> int:
         rows = self.execute("""
             SELECT COUNT(*) FROM parallel_storage
-            WHERE pid = ? AND status IN ('INIT', 'UPLOADING', 'READY', 'ERROR')
+            WHERE pid = ? AND status IN ('INIT', 'UPLOADING', 'READY')
         """, pid)
         return rows[0][0]
 
@@ -541,6 +540,8 @@ class MultiPartUploader:
             raise PsArgmentsError("total_chunks")
         if (size + total_chunks - 1) // total_chunks > self.chunk_max_size:
             raise PsArgmentsError("total_chunks")
+        if size <= (total_chunks - 1) * ((size + total_chunks - 1) // total_chunks):
+            raise PsArgmentsError("total_chunks")
         if total_chunks > max(1, (size + self.min_chunk_size - 1) // self.min_chunk_size):
             raise PsArgmentsError("total_chunks")
         if not isinstance(sha256, str) or not SHA256_RE.fullmatch(sha256):
@@ -584,7 +585,7 @@ class MultiPartUploader:
         if len(blob) != expected:
             raise PsChunkSizeMismatchError(expected, len(blob))
         if hashlib.sha256(blob).hexdigest().lower() != sha256.lower():
-            self._PSDBM.status_change(pid, meta.contents_id, "ERROR")
+            self._failed(pid, public_id)
             raise PsDataCorruotedError()
         fd = os.open(working_dir / f"chunk{count}.parts", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "wb") as output:

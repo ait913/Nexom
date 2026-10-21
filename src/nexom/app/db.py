@@ -69,15 +69,22 @@ class DatabaseManager:
         """Open a SQLite connection and apply PRAGMA defaults."""
         try:
             self.auto_commit = auto_commit
-            self._conn = connect(self.db_file)
             if (self.file_mode is not None and self.db_file != ":memory:"
                     and not str(self.db_file).startswith("file:")):
                 try:
-                    os.chmod(self.db_file, self.file_mode)
+                    try:
+                        fd = os.open(self.db_file, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                    except FileExistsError:
+                        pass  # existing file: leave its mode alone
+                    else:
+                        try:
+                            if self.file_mode != 0o600:
+                                os.fchmod(fd, self.file_mode)
+                        finally:
+                            os.close(fd)
                 except OSError as e:
-                    self._conn.close()
-                    self._conn = None
                     raise DBOperationalError(str(e)) from e
+            self._conn = connect(self.db_file)
             self._cursor = self._conn.cursor()
 
             # ---- SQLite safety / performance defaults ----

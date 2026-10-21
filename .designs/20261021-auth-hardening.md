@@ -514,10 +514,12 @@ class UserDatabaseManager(DatabaseManager):
 |---|---|---|
 | K-1 | `POST /user/login/` JSON 正しい資格情報 (Origin ヘッダ無し) | 200 `{"ok": true, "user_id": ..., "public_name": ..., "expires_at": ...}`。**`token` キー無し**。`Set-Cookie: _nxt=<token>; Max-Age=<expires_at-now>; Path=/; Secure; HttpOnly; SameSite=Lax` (属性の並びは Cookie 契約に従う。`Max-Age` は `604800` ± 1 を許容)。**現状**: `MaxAge=1761000000` + body に token |
 | K-2 | `POST /user/logout/` with cookie `_nxt=<token>` (JSON、Origin 無し) | 200 `{"ok": true}`、`Set-Cookie` に `_nxt=; Max-Age=0; Path=/` (削除ヘルパの出力)。AuthService 側 revoked。**現状**: `MaxAge=0` (無効) |
-| K-3 | 同、`Content-Type: application/x-www-form-urlencoded` (HTML form) | 302 `Location: /` + 削除 cookie。Referer は見ない (**現状**: Referer を Location に) |
+| K-3 | 同、`Content-Type: application/x-www-form-urlencoded` (HTML form) | 302 `Location: /` + 削除 cookie。Referer は見ない (**現状**: Referer を Location に)。**form-encoded POST は cookie の有無・AuthService の成否に関わらず常に 302 `/` + 削除 cookie** (ブラウザに JSON を見せない)。JSON POST だけが JSON 応答 |
 | K-4 | `GET /user/logout/` | 405 `{"ok": false, "error": "MethodNotAllowed"}` + ヘッダ `Allow: POST`。cookie 不変、AuthService 呼び出しなし。**現状**: GET でログアウト |
-| K-5 | `POST /user/logout/` cookie 無し | 200 `{"ok": true}` + 削除 cookie (冪等) |
-| K-6 | `POST /user/logout/` で AuthService が A09 | 503 `{"ok": false, "error": "A09"}` **かつ** 削除 cookie を付ける (ブラウザ側は確実に外す。サーバー側の revoke は失敗を正直に返す) |
+| K-5 | `POST /user/logout/` cookie 無し (JSON) | 200 `{"ok": true}` + 削除 cookie (冪等)。AuthService 呼び出しなし |
+| K-5b | `POST /user/logout/` cookie 無し、`Content-Type: application/x-www-form-urlencoded` | **302 `Location: /` + 削除 cookie** (JSON を返さない)。AuthService 呼び出しなし。**旧 doc / 実装**: cookie 無しの form POST で `{"ok": true}` がブラウザに表示されていた |
+| K-6 | `POST /user/logout/` (JSON) で AuthService が A09 | 503 `{"ok": false, "error": "A09"}` **かつ** 削除 cookie を付ける (ブラウザ側は確実に外す。サーバー側の revoke は失敗を正直に返す) |
+| K-6b | 同、form-encoded POST で AuthService が A09 | 302 `Location: /` + 削除 cookie (K-3 の規則どおり JSON を返さない)。失敗はアプリ側 `AppLogger.warn` に `logout revoke failed: A09` を 1 行 (ユーザーには見せない) |
 | K-7 | login POST で AuthService が A11 / A12(field=password) | 429 `{"ok": false, "error": "A11"}` / 400 `{"ok": false, "error": "A12", "field": "password"}` (field を透過) |
 | K-8 | login POST が form (非 JSON) | 400 A01 field=body |
 | K-9 | `GET /user/login/`, `GET /user/signup/` | 200 HTML (変更なし) |
@@ -733,6 +735,7 @@ def app(environ, start_response):
 | N-8 | AuthClient 側の verify 結果キャッシュ (30 s) | revoke / パスワード変更の即時性が落ちる。ゲージで verify の応答性を守る方を採る |
 | N-15 | 失敗カウンタを「ハッシュ後に加算」する (予約なし) | ロック確認 → ハッシュ → 加算 の間に別 worker の試行が割り込むと、閾値 5 回を超えて 6 回・7 回目のハッシュまで走る。ハッシュ前に予約し成功で戻す方式なら閾値が厳密上限になる (L-7b / S-13b) |
 | N-16 | login の透過再ハッシュを `WHERE uid=?` だけで UPDATE する | 照合後・UPDATE 前に別接続の `update_password` が完了すると旧パスワードが復活する (リリース前ゲート RG01)。照合に使った旧 `password_hash` / `password_salt` を WHERE に含める旧値条件 UPDATE (0 行なら何もしない) で閉じる (L-18 / L-18b)。トランザクションで囲む案は `DatabaseManager` が文単位 auto-commit で、PBKDF2 (≈125 ms) の間 DB を握ることになるので採らない |
+| N-17 | AuthPages の `_json_body` / `_auth_error` (JSON 本文の取り出しと NexomError → JSON 整形) を `AuthService._body` / handler のエラー整形と共通化する | code-review で重複として指摘されたが、1.2.0 では見送り (リリース後の品質改善)。両者は `field` 透過と status 決定の規則が同じなので共通ヘルパ 1 つに寄せられる。今回はリリース範囲を広げないため記録のみ |
 | N-9 | `verify` 失敗を `TOKEN_INVALID` でログ | 期限切れ cookie を持つ閲覧者のページビューごとに 1 行書く = ログ DoS 面。意図的な認証付き API 呼び出し (T-2) だけ記録 |
 | N-10 | `user_id` を NFKC + 小文字化して保存 | 既存 ID と衝突規則が変わる。新規は正規表現で小文字のみに制限し、衝突検査は `COLLATE NOCASE` で済ませる (保存値は入力そのまま) |
 | N-11 | `public_name` から `<` `>` を許し表示側エスケープに全面依存 | エスケープは http doc で既定化するが、`Markup` の誤用 1 箇所で stored XSS が全アプリに伝播する供給源を auth 層で絶てる。正規名で `<>` を使う例は無視できる |

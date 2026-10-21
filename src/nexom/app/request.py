@@ -142,12 +142,7 @@ class Request:
             if value.startswith('"') and value.endswith('"'):
                 value = value[1:-1]
             cookies.setdefault(name, value)
-        if "self" in cookies:
-            # Avoid colliding with the constructor's instance parameter.
-            parsed = RequestCookies()
-            parsed.update(cookies)
-            return parsed
-        return RequestCookies(**cookies)
+        return RequestCookies(cookies)
 
     @property
     def remote_addr(self) -> str:

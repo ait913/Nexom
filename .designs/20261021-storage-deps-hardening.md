@@ -192,7 +192,7 @@ IMAGE_CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "ima
 | `comp_img(public_id, width, height, quality) -> Path` | `comp_img(pid: str \| None, public_id: str, width: int \| None, height: int \| None, quality: int \| None) -> Path` | **破壊** |
 | `update_suffix(public_id, suffix) -> None` | `update_suffix(pid: str, public_id: str, suffix: str) -> None` (commit 前のみ、宣言拡張子の上書き) | **破壊** |
 | `update_status(public_id, status) -> None` | **削除** (中止は `delete` を使う) | **破壊** |
-| `delete(pid, public_id, *, force=False) -> None` | 同じ | 互換 |
+| `delete(pid, public_id, *, force=False) -> None` | `delete(pid: str \| None, public_id: str, *, force: bool = False) -> None`。手順: (1) `ID_RE`; (2) `getMeta`; (3) **所有者検査を先に**: `not force and (pid が None / 空 / != meta.pid)` → `PsPermissionError` (ファイルには触らない); (4) `contents/<cid>__PSC_*` を削除; (5) `working_dir/<public_id>` を削除; (6) `DBM.remove(pid, public_id=..., force=force)` | 互換 (force=True で pid None を許可) |
 
 ### 5.2 `ParallelStorageDBM` (`DatabaseManager` 継承)
 
@@ -205,8 +205,8 @@ IMAGE_CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "ima
 | `update_types(contents_id, types)` | `update_types(pid: str, contents_id: str, types: FileTypes)` | **破壊** |
 | `update_suffix(contents_id, suffix)` | `update_suffix(pid: str, contents_id: str, suffix: str)` | **破壊** |
 | — | `finalize_commit(pid: str, contents_id: str, *, types: FileTypes, suffix: str) -> None` (types + suffix + status='COMMITTED' を 1 UPDATE) | 新規 |
-| `remove(pid: str \| None, *, contents_id=None, public_id=None)` | `remove(pid: str, *, contents_id: str \| None = None, public_id: str \| None = None, force: bool = False)` | **破壊** (None 不可) |
-| — | `count_active(pid: str) -> int` (status IN INIT/UPLOADING/READY/ERROR の行数) | 新規 |
+| `remove(pid: str \| None, *, contents_id=None, public_id=None)` | `remove(pid: str \| None, *, contents_id: str \| None = None, public_id: str \| None = None, force: bool = False)`。`force=False` で pid が None / 空 / 不一致 → `PsPermissionError`。`force=True` は pid を見ない (None 可、管理用途) | **破壊** (暗黙の無検査削除が消える) |
+| — | `count_active(pid: str) -> int` (status IN INIT/UPLOADING/READY の行数。ERROR は数えない — ERROR 遷移時に作業ディレクトリを即時削除するのでディスクを持たない。READY は結合前の全チャンクを持つので数える) | 新規 |
 | — | `list_stale(older_than_seconds: int) -> list[FileMeta]` (status IN INIT/UPLOADING/READY/ERROR/ABORTED かつ `creation_date <= datetime('now', ?)`、引数 `f"-{n} seconds"`) | 新規 |
 
 全変更系メソッドの共通手順: (1) `getMeta` で行を取る (無ければ `PsContentsIDInvalidError` / `PsPublicIDInvalidError`)、(2) `not force and meta.pid != pid` なら `PsPermissionError`、(3) SQL は `... WHERE contents_id = ? AND pid = ?` (force 時は pid 条件なし) で二重化、(4) commit。
@@ -219,7 +219,7 @@ IMAGE_CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "ima
 | `register(filename, size, pid, permission_id, total_chunks, sha256) -> str` | `register(filename: str, size: int, pid: str, total_chunks: int, sha256: str) -> str` | **破壊** (旧 6 引数の位置呼び出しは新 5 引数シグネチャに対して Python の `TypeError`) |
 | `parts_upload(pid, public_id, count, blob, sha256) -> None` | 同じシグネチャ、検査追加 | 互換 (挙動変更) |
 | `commit(pid, public_id) -> FileMeta` | 同じ、検査追加 | 互換 (挙動変更) |
-| `_failed(pid, public_id)` (未使用) | `_failed(pid: str, public_id: str) -> None` を復活: status を ERROR にして作業ディレクトリを rmtree (行は残す) | 内部 |
+| `_failed(pid, public_id)` (未使用) | `_failed(pid: str, public_id: str) -> None` を復活: status を ERROR にして作業ディレクトリを rmtree (行は残す)。**ERROR への遷移は全てこの関数経由** (parts_upload の sha 不一致、commit の検証失敗、画像上限超過) | 内部 |
 | — | `gc(*, older_than_seconds: int = 86400) -> GcReport` | 新規 |
 | — | `expected_chunk_size(size: int, total_chunks: int, count: int) -> int` (モジュール関数) | 新規 |
 
@@ -236,7 +236,7 @@ IMAGE_CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "ima
 
 | 変更前 | 変更後 |
 |---|---|
-| `__init__(db_file, auto_commit=True)` | `__init__(db_file: str, auto_commit: bool = True, *, file_mode: int \| None = 0o600)`。`connect()` 直後 (PRAGMA の前) に `os.chmod(db_file, file_mode)`。対象外: `":memory:"`、`file:` で始まる URI、`file_mode=None`。`OSError` は `DBOperationalError(str(e))`。WAL / SHM は SQLite が本体の mode を継承する (実測: 本体 0600 → `-wal` / `-shm` も 0600)。**接続後の初期化 (chmod / PRAGMA / サブクラスの `_init` = テーブル作成・移行) が例外を上げたら、`self._conn.close()` して `_conn` / `_cursor` を None に戻した上で再送出する** (接続リークと、半端な状態のオブジェクトが残るのを防ぐ、RG09) |
+| `__init__(db_file, auto_commit=True)` | `__init__(db_file: str, auto_commit: bool = True, *, file_mode: int \| None = 0o600)`。`sqlite3.connect()` の **前** に `fd = os.open(db_file, os.O_CREAT \| os.O_RDWR, file_mode); os.close(fd)` を 1 回呼ぶ (`O_EXCL` 無し: ファイルが無ければ `file_mode & ~umask` で作られ、既にあれば mode は **変更しない**。毎回の chmod はしない — 運用が 0640 にした DB を起動ごとに戻さない、`connect()` が umask で作ってから chmod するまでの窓も無い)。対象外: `":memory:"`、`file:` で始まる URI、`file_mode=None`。`OSError` は `DBOperationalError(str(e))`。WAL / SHM は SQLite が本体の mode を継承する (実測: 本体 0600 → `-wal` / `-shm` も 0600)。**接続後の初期化 (PRAGMA / サブクラスの `_init` = テーブル作成・移行) が例外を上げたら、`self._conn.close()` して `_conn` / `_cursor` を None に戻した上で再送出する** (接続リークと、半端な状態のオブジェクトが残るのを防ぐ、RG09) |
 | `execute(sql, *args)`: `SELECT` で始まる時だけ fetchall | `self._cursor.description is not None` のとき fetchall (PRAGMA / WITH / RETURNING も行を返す)。INSERT / UPDATE / DELETE は従来どおり None |
 
 サブクラス (`AuthDBM`, `UserDatabaseManager`) は位置引数で `super().__init__` を呼んでいるので既定 0600 が自動で効く (横断効果、§8-5)。
@@ -302,6 +302,8 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 | A-3 | `ps._PSDBM.remove("A", public_id=public_id)` | 正常終了 | DB 行が消える | 同じ |
 | A-4 | `ps._PSDBM.remove("B", public_id=public_id, force=True)` | 正常終了 | DB 行が消える | — |
 | A-5 | `ps.delete("B", public_id, force=True)` | 正常終了 | 行・ファイル・作業ディレクトリが消える | 同じ |
+| A-5a | `ps.delete(None, public_id, force=True)` | 正常終了 (管理用途) | 全て消える | — |
+| A-5b | `ps.delete(None, public_id)` / `ps.delete("", public_id)` / `ps.delete("B", public_id)` (A のオブジェクト、キャッシュ `.webp` も作成済) | `PsPermissionError` **かつ** `contents/<cid>__PSC_*` の全ファイルと DB 行が残る (所有者検査がファイル削除より前。半適用削除なし) | なし | force=False で pid 不一致は同じだが、検査の位置は同じ (本項は順序を固定するための回帰テスト) |
 | A-6 | `ps.getMeta("B", public_id)` | `PsPermissionError` | なし | pid 引数なしで取得可 |
 | A-7 | `ps.getMeta(None, public_id)` | `FileMeta` を返す (capability モデル) | なし | 同等 |
 | A-8 | `ps.getMeta("A", public_id)` | `FileMeta` | なし | — |
@@ -386,9 +388,9 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 
 `expected_chunk_size(size, total_chunks, count)`: `chunk = ceil(size / total_chunks)`; `count < total_chunks - 1` → `chunk`、最後は `size - chunk * (total_chunks - 1)`。
 
-`register(filename, size, pid, total_chunks, sha256)` の検査順: (1) `pid` が非空 str でなければ `PsArgmentsError("pid")`; (2) `size` が `int` (bool 不可) で `> 0` でなければ `PsArgmentsError("size")`; `size > max_upload_size` → `PsUploadTooLargeError(size, max_upload_size)`; (3) `total_chunks` が `int` で `>= 1` でなければ `PsArgmentsError("total_chunks")`; (4) `ceil(size/total_chunks) > chunk_max_size` → `PsArgmentsError("total_chunks")`; `total_chunks > max(1, ceil(size / min_chunk_size))` → `PsArgmentsError("total_chunks")`; (5) `SHA256_RE` 不一致 → `PsArgmentsError("sha256")`; (6)(7) は **同一トランザクション**: `BEGIN IMMEDIATE` で書きロックを取ってから `count_active(pid)` を数え、`>= max_active_uploads_per_pid` なら ROLLBACK して `PsTooManyActiveUploadsError(limit)`、そうでなければ同じトランザクション内で行 INSERT → COMMIT (別接続の並行 register は `BEGIN IMMEDIATE` で `busy_timeout` 3 秒まで待つので、カウントと INSERT の間に他方が割り込めず上限を超えない); (7) 行 INSERT (`filename = Path(filename).name` の stem を 200 文字で切る、`suffix` / `original_suffix` は B-10〜12)、作業ディレクトリ `mkdir(parents=True)` 後 `os.chmod(dir, 0o700)`、`meta.json` を `os.open(..., O_WRONLY|O_CREAT|O_TRUNC, 0o600)` で書く。
+`register(filename, size, pid, total_chunks, sha256)` の検査順: (1) `pid` が非空 str でなければ `PsArgmentsError("pid")`; (2) `size` が `int` (bool 不可) で `> 0` でなければ `PsArgmentsError("size")`; `size > max_upload_size` → `PsUploadTooLargeError(size, max_upload_size)`; (3) `total_chunks` が `int` で `>= 1` でなければ `PsArgmentsError("total_chunks")`; (4) `chunk = ceil(size/total_chunks)`; `chunk > chunk_max_size` → `PsArgmentsError("total_chunks")`; `total_chunks > max(1, ceil(size / min_chunk_size))` → `PsArgmentsError("total_chunks")`; `size <= (total_chunks - 1) * chunk` → `PsArgmentsError("total_chunks")` (最終チャンクが 0 以下になり永遠に完了できない組: size=5, total=4 → chunk=2, 3×2=6 ≥ 5); (5) `SHA256_RE` 不一致 → `PsArgmentsError("sha256")`; (6)(7) は **同一トランザクション**: `BEGIN IMMEDIATE` で書きロックを取ってから `count_active(pid)` を数え、`>= max_active_uploads_per_pid` なら ROLLBACK して `PsTooManyActiveUploadsError(limit)`、そうでなければ同じトランザクション内で行 INSERT → COMMIT (別接続の並行 register は `BEGIN IMMEDIATE` で `busy_timeout` 3 秒まで待つので、カウントと INSERT の間に他方が割り込めず上限を超えない); (7) 行 INSERT (`filename = Path(filename).name` の stem を 200 文字で切る、`suffix` / `original_suffix` は B-10〜12)、作業ディレクトリ `mkdir(parents=True)` 後 `os.chmod(dir, 0o700)`、`meta.json` を `os.open(..., O_WRONLY|O_CREAT|O_TRUNC, 0o600)` で書く。
 
-`parts_upload(pid, public_id, count, blob, sha256)` の検査順: (1) `ID_RE` → `PsPublicIDInvalidError`; (2) 行なし → `PsPublicIDInvalidError`; (3) `meta.pid != pid` → `PsPermissionError`; (4) `status ∉ {INIT, UPLOADING, ERROR}` または作業ディレクトリ無し → `PsFileStatusInvalidError`; (5) `count` が `int` (bool 不可) で `0 <= count < total_chunks` でなければ `PsArgmentsError("count")`; (6) `blob` が `bytes | bytearray` でなければ `PsArgmentsError("blob")`; `len(blob) > chunk_max_size` → `PsChunkEntityTooLargeError`; `len(blob) != expected_chunk_size(...)` → `PsChunkSizeMismatchError(expected, actual)`; (7) `sha256(blob)` を **メモリ上で** 計算し不一致 → `status_change(ERROR)` して `PsDataCorruotedError` (チャンクファイルは書かない); (8) `chunk<count>.parts` を 0600 で書く (既存なら上書き = 再送許容); (9) 全チャンクの存在を毎回数え、揃えば `READY`、揃わなければ `UPLOADING`。
+`parts_upload(pid, public_id, count, blob, sha256)` の検査順: (1) `ID_RE` → `PsPublicIDInvalidError`; (2) 行なし → `PsPublicIDInvalidError`; (3) `meta.pid != pid` → `PsPermissionError`; (4) `status ∉ {INIT, UPLOADING}` または作業ディレクトリ無し → `PsFileStatusInvalidError` (ERROR は作業ディレクトリが既に無いので再送不可、register からやり直し); (5) `count` が `int` (bool 不可) で `0 <= count < total_chunks` でなければ `PsArgmentsError("count")`; (6) `blob` が `bytes | bytearray` でなければ `PsArgmentsError("blob")`; `len(blob) > chunk_max_size` → `PsChunkEntityTooLargeError`; `len(blob) != expected_chunk_size(...)` → `PsChunkSizeMismatchError(expected, actual)`; (7) `sha256(blob)` を **メモリ上で** 計算し不一致 → `_failed(pid, public_id)` (status ERROR + 作業ディレクトリ削除、行は残す) して `PsDataCorruotedError` (チャンクファイルは書かない); (8) `chunk<count>.parts` を 0600 で書く (既存なら上書き = 再送許容); (9) 全チャンクの存在を毎回数え、揃えば `READY`、揃わなければ `UPLOADING`。
 
 `commit(pid, public_id)`: (1)(2)(3) 同上; (4) `status != "READY"` → `PsFileStatusInvalidError`; (5) 結合 → 全体 sha256 不一致 / サイズ不一致 → `_failed` (status ERROR + 作業ディレクトリ削除) して `PsDataCorruotedError`; (6) `classify_file` → `PsImageTooLargeError` なら `_failed` して再送出; (7) `contents_root / format_psc_filename(cid, cls.suffix)` に `shutil.move` (既存は unlink)、(8) `finalize_commit(pid, cid, types=cls.types, suffix=cls.suffix)`; (9) 作業ディレクトリ削除; 戻り値 `getMeta(contents_id=cid)`。
 
@@ -402,16 +404,18 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 | E-4 | 既定 `min_chunk_size` (256 KiB) で `register("f.bin", 1000, "A", 2, sha)` | `PsArgmentsError("total_chunks")` | — | 受理 |
 | E-5 | `register("f.bin", 18, "A", 2, sha)` (min_chunk_size=1) | 正常、public_id (32 文字、`ID_RE` 合致) を返す。`workers/<public_id>` の mode が `0o700`、`meta.json` が `0o600` | — | umask 依存 (0755 / 0644) |
 | E-6 | `register(..., sha256="xyz")` / `"A"*64` 以外の長さ | `PsArgmentsError("sha256")` | — | 受理 |
+| E-2a | `register("f.bin", 5, "A", 4, sha)` (min_chunk_size=1) | `PsArgmentsError("total_chunks")` (chunk=2、3×2=6 ≥ 5 で最終チャンク長が −1) | 行なし | 受理され永遠に READY にならない |
 | E-7 | 同じ pid で `register` を 8 回 (既定 `max_active_uploads_per_pid`) → 9 回目 | 9 回目が `PsTooManyActiveUploadsError(8)`; `MultiPartUploader(..., max_active_uploads_per_pid=2)` なら 3 回目 | — | 無制限 |
 | E-8 | E-7 の後、1 件を `delete` (または commit) して再度 `register` | 正常 (COMMITTED は active に数えない) | — | — |
+| E-8b | `max_active_uploads_per_pid=2` で、同じ pid の 2 件を E-14 の手順で `ERROR` にした直後に `register` | 正常 (ERROR は active に数えない。失敗の積み重ねで register 不能にならない) | — | — |
 | E-8a | 同じ DB ファイルに別接続の `MultiPartUploader` を 2 本作り、同じ pid で active 7 件にした上で、2 本から **同時に** (スレッド 2 本、`threading.Barrier` で揃えて) `register` | ちょうど 1 本が成功し、もう 1 本が `PsTooManyActiveUploadsError(8)`。終了後 `count_active(pid) == 8` (9 にならない) | — | 2 本とも成功し 9 件 (RG06) |
 | E-9 | `data = b"hello-world-012345"` (18 B), total 2 → chunk0 を `data[:8]`、chunk1 を `data[8:]` で送る | chunk0 で `PsChunkSizeMismatchError(9, 8)`; `chunk0.parts` は書かれない; status INIT のまま | — | 受理 |
 | E-10 | 同データを `data[:9]`, `data[9:]` で送る | 両方正常、1 つ目後 `status == "UPLOADING"`、2 つ目後 `"READY"`。`chunk0.parts` / `chunk1.parts` の mode 0o600 | — | 0644 |
 | E-11 | E-10 を **逆順** (count 1 → count 0) | 2 つ目後に `READY` | — | count==total-1 でだけ判定するため 0 → 1 の順でないと READY にならない |
 | E-12 | `parts_upload("A", pid, 999999, blob, sha)` / `-1` / `"0"` / `True` | `PsArgmentsError("count")` | ファイル無し | `chunk999999.parts` が書かれる |
 | E-13 | `parts_upload` で 10 MiB + 1 バイト | `PsChunkEntityTooLargeError` | — | 同じ |
-| E-14 | 正しいサイズ・誤った sha256 | `PsDataCorruotedError`、`status == "ERROR"`、`chunk<count>.parts` は存在しない | — | **`PsStatusTypesError`** (ERROR が許容リストに無い) かつ壊れたチャンクがディスクに残る |
-| E-15 | E-14 の後、正しいチャンクを同じ count で再送 → 残りも送る → commit | 正常に COMMITTED (ERROR からの復帰) | — | — |
+| E-14 | 正しいサイズ・誤った sha256 | `PsDataCorruotedError`、`status == "ERROR"`、`workers/<public_id>` ディレクトリ全体が存在しない (チャンクを即時解放)、DB 行は残る (診断用、gc が後で消す) | — | **`PsStatusTypesError`** (ERROR が許容リストに無い) かつ壊れたチャンクがディスクに残る |
+| E-15 | E-14 の後、同じ public_id に正しいチャンクを `parts_upload` | `PsFileStatusInvalidError` (作業ディレクトリ無し)。クライアントは `register` からやり直す | — | 再送可 |
 | E-16 | 全チャンク揃う前 (`status == "UPLOADING"`) に `commit` | `PsFileStatusInvalidError`、作業ディレクトリは残る | — | 欠けたチャンクで `PsDataCorruotedError` |
 | E-17 | 全体 sha256 を誤って register → 全チャンク正常 → commit | `PsDataCorruotedError`、`status == "ERROR"`、`workers/<public_id>` が存在しない、`contents/` にファイル無し | — | 例外のみ、作業ディレクトリ残存 |
 | E-18 | COMMITTED 後に再度 `commit` | `PsFileStatusInvalidError` | — | `meta.json` 無しで `PsDataCorruotedError` |
@@ -461,9 +465,10 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 
 | # | 操作 | 期待 | 現状 |
 |---|---|---|---|
-| DB-1 | `DatabaseManager(str(tmp/"a.db"))` 後の `a.db` の mode | `0o600`。`a.db-wal` / `a.db-shm` が生成されていれば同じく `0o600` | umask (0644) |
-| DB-2 | `DatabaseManager(path, file_mode=None)` | umask 依存 (chmod しない) | — |
-| DB-3 | `DatabaseManager(path, file_mode=0o640)` | `0o640` | — |
+| DB-1 | 存在しない `tmp/"a.db"` で `DatabaseManager(str(tmp/"a.db"))` 後の `a.db` の mode | `0o600` (テストは `os.umask(0o022)` 下で実行)。`a.db-wal` / `a.db-shm` が生成されていれば同じく `0o600` | umask (0644) |
+| DB-1a | 先に `tmp/"a.db"` を `0o644` で作成 (`sqlite3.connect` で空 DB を作り `chmod 0o644`) してから `DatabaseManager(path)` | mode は `0o644` のまま (既存ファイルは変更しない) | 同じ |
+| DB-2 | 存在しないパスで `DatabaseManager(path, file_mode=None)` | umask 依存 (`os.open` を呼ばない) | — |
+| DB-3 | 存在しないパスで `DatabaseManager(path, file_mode=0o640)` | `0o640` | — |
 | DB-4 | `DatabaseManager(":memory:")` | 例外なし | 同じ |
 | DB-4a | `_init` が例外を上げるサブクラス (例: `_init` で `raise RuntimeError`) を `tmp/"a.db"` で生成 | `RuntimeError` が呼び出し側に届き、生成途中のインスタンスの `_conn is None` (close 済)。同じパスを別の `DatabaseManager` で直ちに開けて `PRAGMA journal_mode` が通る (ロック・接続リークなし) | — | 接続が開いたまま残る (RG09) |
 | DB-5 | `dbm.execute("PRAGMA user_version")` | `[(0,)]` (行が返る) | `None` |

@@ -955,8 +955,7 @@ def test_M08_raise_if_not_exist_flag():
     r, _ = _router()
     r.raise_if_not_exist = False
     assert r.get("/nope/", method="GET") is None
-    with pytest.raises(PathMethodNotAllowedError):
-        r.get("/submit/", method="GET")
+    assert r.get("/submit/", method="GET") is None
 
 
 def test_M09_methods_sets():

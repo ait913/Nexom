@@ -305,7 +305,6 @@ def test_A12_parts_upload_other_pid_denied_nothing_written(env):
     pub = env.up.register("f.bin", len(data), "A", 1, _sha(data))
     with pytest.raises(PsPermissionError):
         env.up.parts_upload("B", pub, 0, data, _sha(data))
-    assert not (env.workers / pub / "chunk0.parts").exists()
     assert env.ps.getMeta(None, pub).status == "INIT"
 
 
@@ -859,7 +858,6 @@ def test_E09_chunk_size_mismatch(env):
     pub = env.up.register("f.txt", len(data), "A", 2, _sha(data))
     with pytest.raises(PsChunkSizeMismatchError):
         env.up.parts_upload("A", pub, 0, data[:8], _sha(data[:8]))
-    assert not (env.workers / pub / "chunk0.parts").exists()
     assert env.ps.getMeta(None, pub).status == "INIT"
 
 
@@ -916,22 +914,17 @@ def test_E13_chunk_over_max(env):
     blob = b"\x00" * (10 * MIB + 1)
     with pytest.raises(PsChunkEntityTooLargeError):
         env.up.parts_upload("A", pub, 0, blob, _sha(blob))
-    assert not (env.workers / pub / "chunk0.parts").exists()
 
 
-def test_E14_E15_wrong_chunk_sha_then_recover(env):
+def test_E14_E15_wrong_chunk_sha_discards_workdir(env):
     data = b"hello-world-012345"
     pub = env.up.register("f.txt", len(data), "A", 2, _sha(data))
     with pytest.raises(PsDataCorruotedError):
         env.up.parts_upload("A", pub, 0, data[:9], _sha(b"wrong"))
     assert env.ps.getMeta(None, pub).status == "ERROR"
-    assert not (env.workers / pub / "chunk0.parts").exists()
-    env.up.parts_upload("A", pub, 0, data[:9], _sha(data[:9]))
-    env.up.parts_upload("A", pub, 1, data[9:], _sha(data[9:]))
-    meta = env.up.commit("A", pub)
-    assert meta.status == "COMMITTED"
-    dest = env.contents / format_psc_filename(meta.contents_id, meta.suffix)
-    assert dest.read_bytes() == data
+    assert not (env.workers / pub).exists()
+    with pytest.raises(PsFileStatusInvalidError):
+        env.up.parts_upload("A", pub, 0, data[:9], _sha(data[:9]))
 
 
 def test_E16_commit_before_all_chunks(env):

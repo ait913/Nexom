@@ -170,6 +170,6 @@ class LogoutPage(Path):
                 )
             except NexomError as e:
                 return _auth_error(e, cookie=set_cookie)
-            if req.content_type == "application/x-www-form-urlencoded":
-                return Redirect("/", cookie=set_cookie)
+        if req.content_type == "application/x-www-form-urlencoded":
+            return Redirect("/", cookie=set_cookie)
         return JsonResponse({"ok": True}, cookie=set_cookie)

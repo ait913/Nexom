@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from email.utils import format_datetime
 import re
-from typing import Literal
+from typing import Literal, Mapping
 
 from .response import Response
 from ..core.error import CookieInvalidAttributeError, CookieInvalidValueError
@@ -154,8 +154,8 @@ class RequestCookies(dict[str, str | None]):
     Container for cookies parsed from a request.
     """
 
-    def __init__(self, **kwargs: str) -> None:
-        super().__init__(kwargs)
+    def __init__(self, cookies: Mapping[str, str] | None = None) -> None:
+        super().__init__(cookies or {})
         self.default: str | None = None
 
     def get(self, key: str, default: str | None = None) -> str | None:

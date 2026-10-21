@@ -295,8 +295,17 @@ class Router(list[Path]):
         """
         Resolve a Path for a request path and method.
 
-        Returns None if not found and raise_if_not_exist is False.
+        Returns None if not found (404 or 405) and raise_if_not_exist is False.
         """
+        if self.raise_if_not_exist:
+            return self._resolve(request_path, method)
+        try:
+            return self._resolve(request_path, method)
+        except (PathNotFoundError, PathMethodNotAllowedError):
+            return None
+
+    def _resolve(self, request_path: str, method: str | None) -> Path:
+        """Resolve a Path; always raises on 404 / 405 regardless of the flag."""
         candidates: list[tuple[Path, int]] = []
         for p in self:
             ok, score = p.match(request_path)
@@ -304,9 +313,7 @@ class Router(list[Path]):
                 candidates.append((p, score))
 
         if not candidates:
-            if self.raise_if_not_exist:
-                raise PathNotFoundError(request_path)
-            return None
+            raise PathNotFoundError(request_path)
         if method is None:
             return max(candidates, key=lambda t: t[1])[0]
 
@@ -326,18 +333,16 @@ class Router(list[Path]):
     def handle(self, request: Request) -> Response:
         """Resolve and execute a route for the given request."""
         try:
-            path = self.get(request.path, method=request.method)
+            path = self._resolve(request.path, request.method)
         except PathMethodNotAllowedError as e:
             if request.method == "OPTIONS":
                 return self._options_response(request, e)
             raise
-        if path is None:
-            raise PathNotFoundError(request.path)
         return path.call_handler(request, tuple(self.middlewares))
 
     def _options_response(self, request: Request, e: PathMethodNotAllowedError) -> Response:
         """Run automatic OPTIONS through middleware without invoking a route."""
-        p = self.get(request.path)
+        p = self._resolve(request.path, None)
         args = p._read_args(request.path)
         handler = lambda req, a: Response(b"", status=204, headers=[("Allow", e.allow_header)])
         if self.middlewares:

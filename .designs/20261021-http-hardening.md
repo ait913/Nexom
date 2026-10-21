@@ -177,6 +177,15 @@ class Cookie:
 
 削除されるもの: `**kwargs` (任意属性)、`set(key, value)`、`attributes` 辞書。`Cookie.name / value / max_age / expires / path / domain / secure / http_only / same_site` を読み取り専用属性として持つ。
 
+```python
+class RequestCookies(dict[str, str | None]):
+    def __init__(self, cookies: Mapping[str, str] | None = None) -> None   # 旧: **kwargs。マッピングを受ける
+    default: str | None                                                     # 不変
+    def get(self, key: str, default: str | None = None) -> str | None       # 不変
+```
+
+`RequestCookies` の公開挙動 (`.get` / dict 等価 / `in` / 反復 / `len`) は不変。変わるのはコンストラクタの受け方だけで、`Request._parse_cookies` 以外に nexom 内の呼び出しは無い (grep)。`RequestCookies(a="b")` のキーワード呼び出しは `TypeError` になる。
+
 ### 5.2 検証規則 (違反は `CookieInvalidValueError` (C01: name / value) または `CookieInvalidAttributeError` (C02: 属性))
 
 | 項目 | 規則 (fullmatch) | 根拠 |
@@ -361,7 +370,7 @@ def client_ip(environ: Mapping[str, Any], *, trusted_proxy_count: int = 0) -> st
 | Q-R5 | `files()`: (a) `_content_length()` を取り、`> max_body_size` なら読む前に RQ01。(b) boundary 無し → RQ02 (現行 `ValueError`)。(c) `wsgi.input` を `_LimitedStream(stream, limit=max_body_size)` で包む — `read(n)` の累積が `limit` を超えた瞬間に RQ01。(d) `MultipartParser(limited, boundary, content_length=cl if cl is not None else -1, part_limit=max_multipart_parts, partsize_limit=max_body_size, disk_limit=max_body_size, memory_limit=min(8 * 1024 * 1024, max_body_size), spool_limit=64 * 1024)`。(e) 反復中の `multipart.ParserLimitReached` → RQ01、その他 `multipart.MultipartError` → RQ02。(f) `File.size = part.size`。(g) `File.content_type = part.content_type` (**現行の `isinstance(part.headers, dict)` 判定は multipart 1.3.1 / 2.0.1 とも `Headers` 型なので常に False で `None` になっていた** — storage doc §9 指摘。`part.content_type` はヘッダ無しのファイルパートに `application/octet-stream` を返す。`File` の型注釈 `str \| None` は据え置く) |
 | Q-R6 | `files()` を `read_body()` の後に呼んだ場合の `ValueError("Body was already read…")` は**そのまま** (プログラミングエラー → 500 でよい) |
 | Q-R7 | `multipart` 未インストール時のメッセージを `"multipart is required … Install with: pip install multipart"` に修正 (python-multipart は別物。C-data DATA-08 付随) |
-| Q-R8 | Cookie 解析 (`_parse_cookies`): `SimpleCookie` を使わず自前で寛容に解析。`HTTP_COOKIE` が無い / 空 → `None`。それ以外 → `;` で分割 → 各片を `strip()` → 最初の `=` で `name, value` に分割 → `name` が §5.2 の token に fullmatch しなければ**その片だけ**捨てる → `value` が `"` で始まり `"` で終わるなら両端を剥がす → 同名は**最初**を採る → `RequestCookies(**dict)`。例外は投げない。例: `a=b; bad\x7fname=1; c=d` → `{"a":"b","c":"d"}`、`a<b=1` → `RequestCookies()` (空、None ではない) |
+| Q-R8 | Cookie 解析 (`_parse_cookies`): `SimpleCookie` を使わず自前で寛容に解析。`HTTP_COOKIE` が無い / 空 → `None`。それ以外 → `;` で分割 → 各片を `strip()` → 最初の `=` で `name, value` に分割 → `name` が §5.2 の token に fullmatch しなければ**その片だけ**捨てる → `value` が `"` で始まり `"` で終わるなら両端を剥がす → 同名は**最初**を採る → `RequestCookies(dict)` (マッピングを渡す。`**` 展開はしない — ユーザー制御のヘッダ名を Python の呼び出し機構に流さない。現行の `RequestCookies(**cookies)` は `self` という名の cookie で `TypeError` になり `except Exception` で素の dict に落ちていた)。例外は投げない。例: `a=b; bad\x7fname=1; c=d` → `{"a":"b","c":"d"}`、`a<b=1` → `RequestCookies()` (空、None ではない)、`self=1; a=b` → `{"self":"1","a":"b"}` で型は `RequestCookies` |
 | Q-R9 | `_LimitedStream` は `read(size: int = -1) -> bytes` だけを持つ。`size < 0` または `size > 残り + 1` のときは `残り + 1` に丸めて読む。`multipart` 2.0.1 は `stream.read(buffer_size)` のみ使う (ソース確認済) |
 
 ---
@@ -448,7 +457,9 @@ MIME 方針: 拡張子 → `mimetypes.guess_type` を維持。`.html` → `text/
 2. `method is None` → `candidates` の最高 score を返す (`AuthPages._handler` が使う経路。不変)
 3. `m = method.upper()`。`allows(p) = p.methods is None or m in p.methods or (m == "HEAD" and "GET" in p.methods)`
 4. `specific = [p for p in candidates if p.methods is not None and allows(p)]`、`agnostic = [p for p in candidates if p.methods is None]`。`specific` → 最高 score、無ければ `agnostic` → 最高 score
-5. どちらも空 → `PathMethodNotAllowedError(request_path, allowed=_allowed_methods(candidates))` を **`raise_if_not_exist` に関わらず raise**
+5. どちらも空 → `PathMethodNotAllowedError(request_path, allowed=_allowed_methods(candidates))`。**`raise_if_not_exist=False` のときは 404 と同じく `None` を返す** (旧契約「見つからなければ None」を維持。Leader 裁定 2026-10-21)
+
+実装上は、常に raise する内部関数 `_resolve(request_path, method) -> Path` (手順 1〜5、404 / 405 とも例外) を持ち、公開 `get()` は `raise_if_not_exist` が False なら `PathNotFoundError` / `PathMethodNotAllowedError` の両方を捕まえて `None` を返すラッパにする。`Router.handle` は `_resolve` を呼ぶので、フラグの値に関係なく 405 / OPTIONS 204 の挙動 (§12.3) になる
 
 `_allowed_methods(candidates)`: `methods is not None` の Path の `methods` の和集合。`"GET"` を含めば `"HEAD"` を追加。常に `"OPTIONS"` を追加。`PathMethodNotAllowedError.allowed: frozenset[str]`、`.allow_header: str = ", ".join(sorted(allowed))` (例 `"GET, HEAD, OPTIONS"`)。
 
@@ -456,7 +467,7 @@ MIME 方針: 拡張子 → `mimetypes.guess_type` を維持。`.html` → `text/
 
 ```
 try:
-    path = self.get(request.path, method=request.method)
+    path = self._resolve(request.path, request.method)     # raise_if_not_exist を見ない
 except PathMethodNotAllowedError as e:
     if request.method == "OPTIONS":
         return self._options_response(request, e)
@@ -464,7 +475,7 @@ except PathMethodNotAllowedError as e:
 return path.call_handler(request, tuple(self.middlewares))
 ```
 
-`_options_response(request, e)`: `p = self.get(request.path)` (method 無し = 最高 score の Path) で `args = p._read_args(request.path)`、終端 handler を `lambda req, a: Response(b"", status=204, headers=[("Allow", e.allow_header)])` とし、`self.middlewares` があれば `MiddlewareChain(...).wrap(終端)` を通して返す。→ **CORS preflight は CORSMiddleware が 204 に Access-Control-* を足す。CORS 無しでも 204 + Allow が返る。handler には届かない**。
+`_options_response(request, e)`: `p = self._resolve(request.path, None)` (method 無し = 最高 score の Path) で `args = p._read_args(request.path)`、終端 handler を `lambda req, a: Response(b"", status=204, headers=[("Allow", e.allow_header)])` とし、`self.middlewares` があれば `MiddlewareChain(...).wrap(終端)` を通して返す。→ **CORS preflight は CORSMiddleware が 204 に Access-Control-* を足す。CORS 無しでも 204 + Allow が返る。handler には届かない**。
 
 405 (OPTIONS 以外) は middleware を通らず例外として wsgi 雛形に上がる (ErrorResponse 405 + `Allow`)。
 
@@ -764,6 +775,7 @@ class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(se
 | Q16 | `HTTP_COOKIE="a<b=1"` | 例外なし、`req.cookie == {}` かつ `req.cookie is not None` (現状: `CookieError`) |
 | Q17 | `HTTP_COOKIE='k="quoted"; k=second'` | `req.cookie["k"] == "quoted"` (引用符除去、最初が勝つ) |
 | Q18 | `HTTP_COOKIE` 無し | `req.cookie is None` |
+| Q21 | `HTTP_COOKIE="self=1; a=b"` | `isinstance(req.cookie, RequestCookies)`、`req.cookie == {"self": "1", "a": "b"}`、`req.cookie.get("self") == "1"` (現状: `TypeError` → 素の `dict` に落ちる)。`RequestCookies({"a": "b"}) == {"a": "b"}`、`RequestCookies() == {}`、`RequestCookies(a="b")` → `TypeError` |
 | Q19 | `req.remote_addr` | `environ["REMOTE_ADDR"]`、無ければ `""` |
 
 ### 17.5 client_ip (X)
@@ -821,7 +833,8 @@ class TemplateUnsafeSlotError(NexomError):             # "OH06"  def __init__(se
 | M5 | `Router(Get("x/", h1, "G"), Post("x/", h2, "P"))` に `GET /x/` → h1、`POST /x/` → h2、`OPTIONS /x/` → 204 `Allow: GET, HEAD, OPTIONS, POST` | |
 | M6 | `Router(Path("x/{a}", h, "Any"), Get("x/fixed", h2, "G"))` に `POST /x/fixed` | `Path` (agnostic) にフォールバック → h 実行 (現行の優先規則を維持) |
 | M7 | `r.get("/submit/")` (method 無し) | `Post` を返す (AuthPages 経路、不変) |
-| M8 | `r.raise_if_not_exist = False; r.get("/nope/", method="GET")` → `None`; `r.get("/submit/", method="GET")` → `PathMethodNotAllowedError` (フラグに関わらず) | |
+| M8 | `r.raise_if_not_exist = False; r.get("/nope/", method="GET")` → `None`; `r.get("/submit/", method="GET")` (パス一致・メソッド不一致) → **`None`** (旧契約維持)。既定 `raise_if_not_exist=True` なら前者 `PathNotFoundError`、後者 `PathMethodNotAllowedError` | |
+| M11 | `r.raise_if_not_exist = False` のまま `r.handle(Request(GET /submit/))` → `PathMethodNotAllowedError`、`r.handle(Request(OPTIONS /submit/))` → 204 + `Allow`、`r.handle(Request(GET /nope/))` → `PathNotFoundError` (`handle` はフラグを見ない) | |
 | M9 | `Post("x/").methods == {"POST"}`、`Get("x/").methods == {"GET"}` | |
 | M10 | `GET /nope/` | `PathNotFoundError` (不変) |
 
@@ -960,7 +973,7 @@ grep 元: `Developments/Projects/aisaba_platform 2/services/**` (2026-10-21、HE
 | 2 | `core/object_html_render.py` | `Markup` / `AttrSafe(Markup)` / `escape` / `safe_url` (unescape → 検査 → 常に escape → `AttrSafe`) / `json_script`、`ObjectHTML(autoescape)`、`__init__` の `on*`/`srcdoc`/`style` スロット検査 (OH06、大文字小文字無視・同種引用符まで走査)、`render → Markup`、`_apply_slots_strict` のエスケープ + タグ内引用符の状態機械で属性値位置なら Markup も escape (`AttrSafe` は素通し)、`_set_doc` の予約名スキップ |
 | 3 | `app/template.py` | `autoescape` 引き渡し、戻り値 Markup、再 export |
 | 4 | `app/response.py` | §6 / §7 / `ErrorResponse(headers, escape, charset)` |
-| 5 | `app/cookie.py` | §5 |
+| 5 | `app/cookie.py` | §5 (`Cookie` 全面、`RequestCookies.__init__` をマッピング受けに) |
 | 6 | `app/request.py` | §8 / §9 (`client_ip`、`_LimitedStream`、寛容 cookie 解析、`File.size`) |
 | 7 | `app/path.py` | §10 / §12 |
 | 8 | `app/middleware.py` | §11 |
