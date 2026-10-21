@@ -5,14 +5,19 @@ from __future__ import annotations
 
 from importlib import resources
 import pathlib as plb
+import time
+from typing import Callable
 
-from ..app.auth import AuthClient, KEY_NAME
+from nexom.app.auth import AuthClient, KEY_NAME, is_same_origin
 from ..app.request import Request
-from ..app.response import HtmlResponse, JsonResponse, Redirect, ErrorResponse
+from ..app.response import HtmlResponse, JsonResponse, Redirect, Response
 from ..app.cookie import Cookie
 from ..app.path import Path, Router
 from ..core.object_html_render import HTMLDoc, ObjectHTML
-from ..core.error import NexomError, _status_for_auth_error
+from ..core.error import (
+    NexomError, PathNotFoundError, RequestParseError, RequestEntityTooLargeError,
+    AuthMissingFieldError, _status_for_auth_error,
+)
 
 
 # --------------------
@@ -35,6 +40,25 @@ _OHTML: ObjectHTML = ObjectHTML(
 # Pages
 # --------------------
 
+def _auth_error(error: NexomError, *, cookie: Cookie | None = None) -> JsonResponse:
+    body = {"ok": False, "error": error.code}
+    if hasattr(error, "field"):
+        body["field"] = error.field
+    return JsonResponse(body, status=_status_for_auth_error(error.code), cookie=cookie)
+
+
+def _json_body(req: Request) -> dict:
+    if req.content_type != "application/json":
+        raise AuthMissingFieldError("body")
+    try:
+        data = req.json()
+    except (ValueError, RequestParseError, RequestEntityTooLargeError) as e:
+        raise AuthMissingFieldError("body") from e
+    if not isinstance(data, dict):
+        raise AuthMissingFieldError("body")
+    return data
+
+
 class AuthPages(Path):
     def __init__(self,
         path: str,
@@ -42,100 +66,110 @@ class AuthPages(Path):
         *,
         login_path: str = "login/",
         signup_path: str = "signup/",
-        logout_path: str = "logout/"
-    ):
+        logout_path: str = "logout/",
+        client_ip: Callable[[Request], str] | None = None,
+    ) -> None:
         self.auth_server = auth_server
-
         root = plb.Path(path)
         self.routing = Router(
-            LoginPage(str(root / login_path), self.auth_server),
-            SignupPage(str(root / signup_path), self.auth_server),
-            LogoutPage(str(root / logout_path), self.auth_server),
+            LoginPage(str(root / login_path), auth_server, client_ip=client_ip),
+            SignupPage(str(root / signup_path), auth_server, client_ip=client_ip),
+            LogoutPage(str(root / logout_path), auth_server, client_ip=client_ip),
         )
-
         base = path.strip("/")
         route = '{"*"}' if not base else f'{base}/{{"*"}}'
         super().__init__(route, self._handler, "UserAuthPage")
 
-    def _handler(self, req: Request, args: dict) -> JsonResponse:
-
+    def _handler(self, req: Request, args: dict) -> Response:
         p = self.routing.get(req.path)
+        if p is None:
+            raise PathNotFoundError(req.path)
         return p.call_handler(req)
 
 
 class LoginPage(Path):
-    def __init__(self, path: str, auth_server: str) -> None:
+    def __init__(self, path: str, auth_server: str, *,
+                 client_ip: Callable[[Request], str] | None = None) -> None:
         super().__init__(path, self._handler, "LoginPage")
-
         self.client = AuthClient(auth_server)
+        self.client_ip = client_ip
 
-    def _handler(self, req: Request, args: dict) -> JsonResponse:
+    def _handler(self, req: Request, args: dict) -> Response:
         if req.method == "GET":
             return HtmlResponse(_OHTML.render("login", page_path=req.path))
-
+        if not is_same_origin(req):
+            return JsonResponse({"ok": False, "error": "A13"}, status=403)
         try:
-            data = req.json() or {}
+            data = _json_body(req)
             sess = self.client.login(
-                user_id=str(data.get("user_id") or ""),
-                password=str(data.get("password") or ""),
+                user_id=data.get("user_id", ""),
+                password=data.get("password", ""),
+                client_ip=req.client_ip if self.client_ip is None else self.client_ip(req),
+                user_agent=req.headers.get("user-agent"),
             )
-
-            set_cookie = Cookie(KEY_NAME, sess.token, Path="/", MaxAge=sess.expires_at)
-            return JsonResponse({"ok": True, "user_id": sess.user_id, "token": sess.token, "expires_at": sess.expires_at}, cookie=str(set_cookie))
+            set_cookie = Cookie(
+                KEY_NAME, sess.token, max_age=sess.expires_at - int(time.time()),
+                same_site="Lax", secure=True, http_only=True, path="/",
+            )
+            return JsonResponse({
+                "ok": True, "user_id": sess.user_id,
+                "public_name": sess.public_name, "expires_at": sess.expires_at,
+            }, cookie=set_cookie)
         except NexomError as e:
-            return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
+            return _auth_error(e)
 
-        except Exception:
-            return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
-        
+
 class SignupPage(Path):
-    def __init__(self, path: str, auth_server: str) -> None:
+    def __init__(self, path: str, auth_server: str, *,
+                 client_ip: Callable[[Request], str] | None = None) -> None:
         super().__init__(path, self._handler, "SignupPage")
-
         self.client = AuthClient(auth_server)
+        self.client_ip = client_ip
 
-    def _handler(self, req: Request, args: dict) -> JsonResponse:
+    def _handler(self, req: Request, args: dict) -> Response:
         if req.method == "GET":
             return HtmlResponse(_OHTML.render("signup", page_path=req.path))
-
+        if not is_same_origin(req):
+            return JsonResponse({"ok": False, "error": "A13"}, status=403)
         try:
-            data = req.json() or {}
+            data = _json_body(req)
             self.client.signup(
-                user_id=str(data.get("user_id") or ""),
-                public_name=str(data.get("public_name") or ""),
-                password=str(data.get("password") or ""),
+                user_id=data.get("user_id", ""),
+                public_name=data.get("public_name", ""),
+                password=data.get("password", ""),
+                client_ip=req.client_ip if self.client_ip is None else self.client_ip(req),
             )
             return JsonResponse({"ok": True}, status=201)
-
         except NexomError as e:
-            return JsonResponse({"ok": False, "error": e.code}, status=_status_for_auth_error(e.code))
+            return _auth_error(e)
 
-        except Exception:
-            return JsonResponse({"ok": False, "error": "InternalError"}, status=500)
-        
 
 class LogoutPage(Path):
-    def __init__(self, path: str, auth_server: str) -> None:
-        super().__init__(path, self._handler, "LogoutPage")
+    def __init__(self, path: str, auth_server: str, *,
+                 client_ip: Callable[[Request], str] | None = None) -> None:
+        super().__init__(path, self._handler, "LogoutPage", methods={"POST"})
         self.client = AuthClient(auth_server)
+        self.client_ip = client_ip
 
-    def _handler(self, req: Request, args: dict) -> Redirect | ErrorResponse:
-        if req.method != "GET":
-            return ErrorResponse(405, "Please make a GET request")
-
+    def _handler(self, req: Request, args: dict) -> Response:
+        # AuthPages dispatches by path; retain the JSON contract on that route.
+        if req.method != "POST":
+            return JsonResponse(
+                {"ok": False, "error": "MethodNotAllowed"}, status=405,
+                headers=[("Allow", "POST")],
+            )
+        if not is_same_origin(req):
+            return JsonResponse({"ok": False, "error": "A13"}, status=403)
         token = req.cookie.get(KEY_NAME) if req.cookie else None
-
-        redirect_url = req.headers.get("referer") or "/"
-        if not redirect_url.startswith("/"):
-            redirect_url = "/"
-
+        set_cookie = Cookie.delete(KEY_NAME, path="/")
         if token:
             try:
-                self.client.logout(token=token)
+                self.client.logout(
+                    token=token,
+                    client_ip=req.client_ip if self.client_ip is None else self.client_ip(req),
+                )
             except NexomError as e:
-                return ErrorResponse(500, e.code)
-            except Exception as e:
-                return ErrorResponse(500, str(e))
-
-        set_cookie = Cookie(KEY_NAME, "", Path="/", MaxAge=0)
-        return Redirect(redirect_url, cookie=str(set_cookie))
+                return _auth_error(e, cookie=set_cookie)
+            if req.content_type == "application/x-www-form-urlencoded":
+                return Redirect("/", cookie=set_cookie)
+        return JsonResponse({"ok": True}, cookie=set_cookie)

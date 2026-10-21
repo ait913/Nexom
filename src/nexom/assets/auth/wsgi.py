@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Callable, Iterable
 import time
 
-from nexom.app.request import Request
-from nexom.app.response import JsonResponse
-from nexom.core.error import NexomError
-from nexom.core.log import AppLogger, AuthLogger
+from nexom.app.request import Request, client_ip
+from nexom.app.response import Response, JsonResponse
+from nexom.core.log import AppLogger, sanitize_log_field
 from nexom.app.auth import AuthService
 
 from auth.config import (
@@ -19,7 +18,8 @@ from auth.config import (
     ACES_LOG,
     AUTH_LOG,
     MASTER_USER,
-    MASTER_PASSWORD,
+    ALLOWED_CLIENTS,
+    TRUSTED_PROXY_COUNT,
 )
 
 
@@ -37,41 +37,31 @@ service = AuthService(
     AUTH_LOG,
     master_user=MASTER_USER,
     master_login_password="",
-    master_password=MASTER_PASSWORD,
+    allowed_clients=ALLOWED_CLIENTS,
 )
 
 
-def _ip(environ: dict) -> str:
-    xff = environ.get("HTTP_X_FORWARDED_FOR")
-    if isinstance(xff, str) and xff.strip():
-        return xff.split(",")[0].strip()
-    return str(environ.get("REMOTE_ADDR") or "-")
-
-
 def app(environ: dict, start_response: Callable) -> Iterable[bytes]:
-    """
-    WSGI application entrypoint.
-    """
+    t0 = time.time()
+    req: Request | None = None
+    res: Response
     try:
-        t0 = time.time()
-
+        req = Request(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)
         res = service.handler(environ)
+    except Exception as e:
+        logger.error(e)
+        res = JsonResponse({"ok": False, "error": "InternalError"}, status=500)
 
-    except NexomError as e:
-        logger.error(e)
-        return JsonResponse({"error": e.code})
-    except Exception:
-        logger.error(e)
-        return JsonResponse({"error": "Internal Server Error"})
-    
     try:
-        req = Request(environ)
         dt_ms = int((time.time() - t0) * 1000)
         method = req.method if req else str(environ.get("REQUEST_METHOD") or "-")
         path = (req.path if req else str(environ.get("PATH_INFO") or "")).lstrip("/")
-        ip = _ip(environ)
+        ip = client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)
         ua = str(environ.get("HTTP_USER_AGENT") or "-")
-        logger.access(f'{ip} "{method} /{path}" {res.status_code} {dt_ms}ms "{ua}"')
+        logger.access(
+            f'{sanitize_log_field(ip)} "{sanitize_log_field(method)} /{sanitize_log_field(path)}" '
+            f'{res.status_code} {dt_ms}ms "{sanitize_log_field(ua)}"'
+        )
     except Exception:
         pass
 

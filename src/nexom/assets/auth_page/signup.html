@@ -61,6 +61,13 @@
       line-height:1.5;
     }
 
+    .hint{
+      margin:0 0 6px;
+      color:var(--muted);
+      font-size:11px;
+      line-height:1.5;
+    }
+
     .grid{
       display:grid;
       grid-template-columns: 1fr 1fr;
@@ -181,21 +188,23 @@
         <div class="grid">
           <div class="full">
             <label for="user_id">ユーザーID</label>
-            <input id="user_id" name="user_id" autocomplete="username" required />
+            <p id="user_id_hint" class="hint">半角小文字英数字と _ . -、3〜32 文字</p>
+            <input id="user_id" name="user_id" autocomplete="username" pattern="[a-z0-9][a-z0-9_.\-]{2,31}" minlength="3" maxlength="32" aria-describedby="user_id_hint" required />
           </div>
 
           <div class="full">
             <label for="public_name">公開名</label>
-            <input id="public_name" name="public_name" autocomplete="nickname" required />
+            <input id="public_name" name="public_name" autocomplete="nickname" maxlength="64" required />
           </div>
 
           <div class="hurf">
             <label for="password">パスワード</label>
-            <input id="password" name="password" type="password" autocomplete="new-password" required />
+            <p id="password_hint" class="hint">8 文字以上</p>
+            <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" aria-describedby="password_hint" required />
           </div>
           <div class="hurf">
             <label for="password2">パスワード (確認)</label>
-            <input id="password2" name="password2" type="password" autocomplete="new-password" required />
+            <input id="password2" name="password2" type="password" autocomplete="new-password" minlength="8" aria-describedby="password_hint" required />
           </div>
         </div>
 
@@ -231,14 +240,24 @@
       "A08": "このセッションは無効化されています。再度ログインしてください。",
       "A09": "認証サービスに接続できません。しばらく時間をおいて再度お試しください。",
 
+      "A11": "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+      "A12": "入力内容の形式が正しくありません。",
+      "A12.user_id": "ユーザーIDは半角小文字英数字で始まり、英数字・_ . - のみ、3〜32 文字です。",
+      "A12.public_name": "公開名は 1〜64 文字で、< > や制御文字は使えません。",
+      "A12.password": "パスワードは 8 文字以上 (256 バイト以内) にしてください。",
+      "A13": "この操作は許可されていません。ページを再読み込みしてください。",
+
       // fallback
       "DEFAULT": "エラーが発生しました。もう一度お試しください。"
     };
-    function getErrorMessage(code) {
+    function getErrorMessage(code, field) {
       if (typeof code !== "string") {
         return error_code_for_message.DEFAULT;
       }
     
+      if (code === "A12" && field) {
+        return error_code_for_message[`A12.${field}`] ?? error_code_for_message.A12;
+      }
       return error_code_for_message[code] ?? error_code_for_message.DEFAULT;
     }
 
@@ -252,9 +271,9 @@
       msg.className = "msg";
       msg.textContent = "";
     }
-    function setError(text){
+    function setError(code, field){
       msg.className = "msg is-error";
-      msg.textContent = getErrorMessage(text);
+      msg.textContent = getErrorMessage(code, field);
     }
 
     async function postJSON(path, bodyObj){
@@ -300,7 +319,7 @@
         if (!r.ok || !r.data || r.data.ok !== true) {
 
           const code = (r.data && r.data.error) ? String(r.data.error) : "UnknownError";
-          setError(code);
+          setError(code, r.data && r.data.field);
           return;
         }
 

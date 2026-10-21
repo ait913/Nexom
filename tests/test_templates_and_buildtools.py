@@ -40,7 +40,9 @@ def test_buildtools_create_app_and_auth(tmp_path: Path):
     assert 'AUTH_DB: str = DATA_DIR + "/db/auth/auth.db"' in cfg
     assert "MASTER_USER: str =" in cfg
     assert "MASTER_USER_LOGIN_PASSWORD: str =" not in cfg
-    assert 'MASTER_PASSWORD: str = "NexomWebFramework"' in cfg
+    assert "MASTER_PASSWORD" not in cfg
+    assert 'ALLOWED_CLIENTS: tuple[str, ...] | None = ("127.0.0.1", "::1")' in cfg
+    assert "TRUSTED_PROXY_COUNT: int = 0" in cfg
 
 
 def test_buildtools_create_config_for_existing_app(tmp_path: Path):

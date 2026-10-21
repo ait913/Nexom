@@ -328,6 +328,7 @@ class AuthMissingFieldError(NexomError):
     """Required auth fields are missing."""
     def __init__(self, key: str) -> None:
         super().__init__("A01", f"Missing field. '{key}'")
+        self.field = key
 
 
 class AuthUserIdAlreadyExistsError(NexomError):
@@ -383,6 +384,25 @@ class AuthPermissionGroupAlreadyExistsError(NexomError):
     def __init__(self) -> None:
         super().__init__("A10", "This permission group_id is already in use.")
 
+class AuthTooManyAttemptsError(NexomError):
+    """Authentication attempt budget is exhausted."""
+    def __init__(self) -> None:
+        super().__init__("A11", "Too many attempts. Try again later.")
+
+
+class AuthInvalidFieldError(NexomError):
+    """An auth field has an invalid format."""
+    def __init__(self, key: str) -> None:
+        super().__init__("A12", f"Invalid field. '{key}'")
+        self.field = key
+
+
+class AuthForbiddenError(NexomError):
+    """The requested auth operation is forbidden."""
+    def __init__(self) -> None:
+        super().__init__("A13", "Forbidden.")
+
+
 def _status_for_auth_error(code: str) -> int:
     return {
         "A01": 400,  # missing field
@@ -395,6 +415,9 @@ def _status_for_auth_error(code: str) -> int:
         "A08": 401,  # token revoked
         "A09": 503,  # auth service unavailable
         "A10": 409,  # permission group_id already exists
+        "A11": 429,  # too many attempts
+        "A12": 400,  # invalid field
+        "A13": 403,  # forbidden
     }.get(code, 400)
     
     
