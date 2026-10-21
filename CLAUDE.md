@@ -44,7 +44,7 @@ venv が無ければ `python3 -m venv .venv; .venv/bin/pip install -e . pytest`�
 1. `pyproject.toml` の `version` を上げる (`__version__` は importlib.metadata で pyproject から取るので触らない)。`CHANGELOG.md` に項を追加
 2. `.venv/bin/python -m build --sdist --wheel --outdir <scratch>/dist` → `.venv/bin/python -m twine check <scratch>/dist/*`
 3. `git push origin main` → `git tag v<version>` → `gh release create v<version> --notes-file <notes>`
-4. `twine upload` は **Touri の PyPI トークンが必要** (ローカルに `~/.pypirc` も keyring も無い)。Touri が `! TWINE_USERNAME=__token__ TWINE_PASSWORD=pypi-... .venv/bin/python -m twine upload <scratch>/dist/*` を実行する
+4. `twine upload` は **Touri の PyPI トークンが必要** (ローカルに `~/.pypirc` も keyring も無い)。Touri がトークンを chat で渡し、Leader が `TWINE_USERNAME=__token__ TWINE_PASSWORD=<token> .venv/bin/python -m twine upload --non-interactive <scratch>/dist/*` を実行 (出力は `sed 's/pypi-[A-Za-z0-9_-]*/pypi-***/g'` でマスク、ファイルに保存しない)。upload 後、クリーン venv で `pip install nexom==<version>` を確認。chat に貼ったトークンは Touri が失効させる (1.2.0: 2026-10-22 実施)
 5. aisaba 側は各サービスの venv で `pip install -U nexom==<version>` → アプリ修正 (移行ガイド) → `systemctl restart nexom@<service>`。順序は **アプリ (AuthClient 利用側) → auth サービス** (auth doc §10.1)
 
 ### aisaba 本番への反映
