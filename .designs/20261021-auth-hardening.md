@@ -382,7 +382,7 @@ class UserDatabaseManager(DatabaseManager):
 | L-17 | `policy=AuthPolicy(hash_busy_ratio=0.0)` の AuthService で、存在しない user 宛の失敗を 3 連続 (1 秒以内) | 1 回目 401 A03 (ハッシュ実行)、**2・3 回目 429 A11** (直近窓の hash 時間 > 0 なのでハッシュしない)。`auth_attempts` は 1 回目の予約分 (count=1) だけで 2・3 回目は行を触らない。ログ `RATE_LIMITED subject=gauge detail=reason=busy`。verify は同時に 200 で応答する (ゲージは PBKDF2 だけに掛かる)。`hash_window_sec` 経過後の 4 回目は 401 A03。前提: 起動時の master 作成ハッシュ (M-3) はゲージに計上しない — `AuthService.__init__` の末尾で計測ログ (`_hash_log`) をクリアする。これが無いと直後の 1 回目が 429 になる |
 | L-17b | 既定 `hash_busy_ratio=0.5` で、ハッシュ 1 回が d ms の機械 (本機 d≈124) | 判定は「ハッシュ前に、直近窓の合計 > 500 ms なら拒否」なので、k 回目が通る条件は `(k-1)·d ≤ 500`。d=124 なら 1〜5 回目が通り (4 回で 496 ms)、6 回目 (合計 620 ms) で 429。Reviewer は自機の d を測って `floor(500/d)+1` 回目までが通り、その次が 429 になることを確認する |
 | L-18 | `legacy_bob` 正しい pw | 200。`users.password_hash` が `pbkdf2_sha256$600000$…` に、`password_salt=''` に更新 (透過再ハッシュ)。更新とセッション INSERT は同一 `BEGIN IMMEDIATE` tx 内で、users 行を再読して照合時の値と一致した場合だけ (§3.2)。2 回目の login も 200 で hash 不変 |
-| L-18b | `legacy_bob` の login が照合を終えた直後 (tx 前) に、別接続の `update/password` が新パスワード `brand-new-99` で完了する (テストでは `_timed_hash` 差し替えで割り込ませる) | tx 内の再読が照合時の値と**不一致** → ROLLBACK、**401 A03、セッションは発行されない** (sessions に行なし)、`password_hash` は `update/password` の値のまま。`login_user:legacy_bob` の予約は失敗として確定 (+1)。その後 `legacy-pass-9` は 401 A03、`brand-new-99` は 200。**旧設計 (uid だけの UPDATE)**: 旧パスワードが復活 (RG01)。**中間案 (旧値条件 UPDATE のみ)**: 旧 pw の照合結果から token が発行され、update_password の全セッション失効をすり抜ける 1 セッションが残った (Codex 第 2 パス) |
+| L-18b | `legacy_bob` の login が照合を終えた直後 (tx 前) に、別接続の `update/password` が新パスワード `brand-new-99` で完了する (テストでは `_timed_hash` 差し替えで割り込ませる) | tx 内の再読が照合時の値と**不一致** → ROLLBACK、**401 A03、セッションは発行されない** (sessions に行なし)、`password_hash` は `update/password` の値のまま。`auth_attempts` の `login_user:legacy_bob` は、login 側の「予約の失敗確定」と割り込んだ `update_password` 成功側の `_reset` (H-1 の規則) が同時に起きるため、**結果は行なし** (reset が後) **または count=1** (reset の後に失敗確定が走った場合) のどちらか。どちらも許容し、Reviewer はこの行を assert しない。その後 `legacy-pass-9` は 401 A03、`brand-new-99` は 200。**旧設計 (uid だけの UPDATE)**: 旧パスワードが復活 (RG01)。**中間案 (旧値条件 UPDATE のみ)**: 旧 pw の照合結果から token が発行され、update_password の全セッション失効をすり抜ける 1 セッションが残った (Codex 第 2 パス) |
 | L-19 | `legacy_bob` 誤 pw | 401 A03、hash 不変 (legacy のまま) |
 | L-20 | `alice` 21 回連続 login 成功 | sessions の alice 行は 20 (created_at 最古の 1 行が削除)。全 21 トークンのうち最初の 1 本は verify で `active: false` |
 | L-21 | 事前に alice の期限切れセッション 3 行 + revoked 2 行がある状態で login | それら 5 行は DELETE される (他ユーザーの行は不変) |
@@ -616,15 +616,15 @@ def app(environ, start_response):
 
 | テンプレート | スロット | 供給元 | 分類 | 1.2.0 での扱い |
 |---|---|---|---|---|
-| `login.html` `<body data-page-path="{{ page_path }}">` | `{{ page_path }}` (**通常テキスト属性の値位置**。旧 1.1.x は `<script>` 内 `const PAGE_PATH = "/{{ page_path }}"` だったが、http doc §4.1 の新規則「script/style 本文のスロットは読み込み時に OH06 で拒否」により 1.2.0 では import 時に落ちるため属性へ移す) | `req.path` (静的セグメント完全一致で `user/login` 以外は到達しない — B-http HTTP-01 付随) | ユーザ入力ではないが環境由来 | 既定エスケープを**そのまま受ける** (属性値位置なので `"` もエスケープされる。`/`・英数・`_` は不変)。`Markup` で包まない。JS は `document.body.dataset.pagePath` で読み、先頭に `/` を付けて `PAGE_PATH` にする |
-| `signup.html` `<body data-page-path="{{ page_path }}">` | 同上 | 同上 | 同上 | 同上 |
+| `login.html` `<body data-page-path="/{{ page_path }}">` | `{{ page_path }}` (**通常テキスト属性の値位置**。先頭の `/` はテンプレート側のリテラル。旧 1.1.x は `<script>` 内 `const PAGE_PATH = "/{{ page_path }}"` だったが、http doc §4.1 の新規則「script/style 本文のスロットは読み込み時に OH06 で拒否」により 1.2.0 では import 時に落ちるため属性へ移す) | `req.path` (`lstrip("/")` 済み = `user/login/`。静的セグメント完全一致で `user/login` 以外は到達しない — B-http HTTP-01 付随) | ユーザ入力ではないが環境由来 | 既定エスケープを**そのまま受ける** (属性値位置なので `"` もエスケープされる。`/`・英数・`_` は不変)。`Markup` で包まない。属性値は `/user/login/` になり、JS は `const PAGE_PATH = document.body.dataset.pagePath` でそのまま使う (`/` の付与は不要) |
+| `signup.html` `<body data-page-path="/{{ page_path }}">` | 同上 (属性値は `/user/signup/`) | 同上 | 同上 | 同上 |
 | (login/signup) | その他のスロットなし | — | — | — |
 
 `templates/auth.py` が HTML に埋める他の値は無い。エラーメッセージは JSON で返し、ページ側 JS が `textContent` で表示する (HTML 化しない、現行どおり)。雛形 `assets/app/pages/default.py` の `user_message` (`<i>{public_name}</i>`) は http doc の範囲。
 
 ### 6.4 `auth_page/login.html`, `signup.html` の変更点 (文言・属性・`page_path` の位置)
 
-- **`page_path` スロットを `<script>` 内から `<body>` 属性へ移動** (両ファイル): `<body>` を `<body data-page-path="{{ page_path }}">` にし、`<script>` 冒頭の `const PAGE_PATH = "/{{ page_path }}"` を `const PAGE_PATH = "/" + (document.body.dataset.pagePath || "");` に置換。`<script>` / `<style>` 本文に `{{ }}` を残さない (http doc §4.1 OH06)。`AUTH_BASE` 等の他の定数は変更なし
+- **`page_path` スロットを `<script>` 内から `<body>` 属性へ移動** (両ファイル): `<body>` を `<body data-page-path="/{{ page_path }}">` (先頭 `/` はリテラル、`req.path` は `lstrip("/")` 済み) にし、`<script>` 冒頭の `const PAGE_PATH = "/{{ page_path }}"` を `const PAGE_PATH = document.body.dataset.pagePath` に置換 (値は既に `/user/login/` なので `/` の付与は不要)。`<script>` / `<style>` 本文に `{{ }}` を残さない (http doc §4.1 OH06)。`AUTH_BASE` 等の他の定数は変更なし
 - `error_code_for_message` に追加:
   - `"A11": "試行回数が多すぎます。しばらく待ってから再度お試しください。"`
   - `"A12": "入力内容の形式が正しくありません。"` + field 別: `"A12.user_id": "ユーザーIDは半角小文字英数字で始まり、英数字・_ . - のみ、3〜32 文字です。"`, `"A12.public_name": "公開名は 1〜64 文字で、< > や制御文字は使えません。"`, `"A12.password": "パスワードは 8 文字以上 (256 バイト以内) にしてください。"`
@@ -686,7 +686,7 @@ def app(environ, start_response):
 | 同 228 non-100 delete → 401 | | 403 |
 | `conftest.py` `make_environ` | REMOTE_ADDR なし | `"REMOTE_ADDR": "127.0.0.1"` を既定に追加。REMOTE_ADDR 無しを前提にするテストは `env.pop("REMOTE_ADDR")` で明示的に外す: 本 doc の G-4、および `tests/test_http_hardening.py` の Q19 / X09 / X12 (http doc 側のテスト。追加キーで落ちるので同じ pop を入れる) |
 | `test_templates_and_buildtools.py:43` | `'MASTER_PASSWORD: str = "NexomWebFramework"' in cfg` | `"MASTER_PASSWORD" not in cfg` と `'ALLOWED_CLIENTS: tuple[str, ...] | None = ("127.0.0.1", "::1")' in cfg` と `"TRUSTED_PROXY_COUNT: int = 0" in cfg` |
-| 同 24-30 `test_auth_pages_login_get` | GET のみ、`HtmlResponse` と 200 を assert | 通る (`_OHTML` の import 時に OH06 が出ないことの確認でもある)。期待を 1 行足す: `GET /user/login/` の body に `data-page-path="user/login/"` が含まれ、`{{` と `const PAGE_PATH = "/{{` が含まれない (signup も同様に `data-page-path="user/signup/"`) |
+| 同 24-30 `test_auth_pages_login_get` | GET のみ、`HtmlResponse` と 200 を assert | 通る (`_OHTML` の import 時に OH06 が出ないことの確認でもある)。期待を 1 行足す: `GET /user/login/` の body に `data-page-path="/user/login/"` が含まれ、`{{` と `const PAGE_PATH = "/{{` が含まれない (signup も同様に `data-page-path="/user/signup/"`) |
 
 `test_core.py` / `test_request_response.py` / `test_router_static_middleware.py` は auth コードを参照しない (grep 済み)。
 
