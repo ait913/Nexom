@@ -1,7 +1,7 @@
 """Application-layer public API for Nexom."""
 
 # ---- Request / Response ----
-from .request import Request
+from .request import Request, client_ip, File
 from .response import (
     Response,
     HtmlResponse,
@@ -17,13 +17,13 @@ from .path import Path, Get, Post, Static, Router
 from .cookie import Cookie, RequestCookies
 
 # ---- Templates ----
-from .template import ObjectHTMLTemplates
+from .template import ObjectHTMLTemplates, Markup, escape, safe_url, json_script
 
 # ---- Auth ----
 from .auth import AuthService, AuthClient, KEY_NAME
 
 # ---- Middleware ----
-from .middleware import Middleware, MiddlewareChain
+from .middleware import Middleware, MiddlewareChain, CORSMiddleware
 
 # ---- Storage ----
 from .parallel_storage import ParallelStorage, MultiPartUploader
@@ -32,6 +32,8 @@ from .parallel_storage import ParallelStorage, MultiPartUploader
 __all__ = [
     # request / response
     "Request",
+    "client_ip",
+    "File",
     "Response",
     "HtmlResponse",
     "JsonResponse",
@@ -51,6 +53,10 @@ __all__ = [
 
     # templates
     "ObjectHTMLTemplates",
+    "Markup",
+    "escape",
+    "safe_url",
+    "json_script",
 
     # auth
     "AuthService",
@@ -60,6 +66,7 @@ __all__ = [
     # middleware
     "Middleware",
     "MiddlewareChain",
+    "CORSMiddleware",
 
     # storage
     "ParallelStorage",

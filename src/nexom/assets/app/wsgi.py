@@ -5,59 +5,55 @@ from __future__ import annotations
 from typing import Callable, Iterable
 import time
 
-from nexom.app.request import Request
+from nexom.app.request import Request, client_ip
 from nexom.app.response import Response, ErrorResponse
-from nexom.core.error import PathNotFoundError
-from nexom.core.log import AppLogger, AuthLogger
+from nexom.app.http_status_codes import http_status_codes
+from nexom.core.error import (
+    PathNotFoundError,
+    PathMethodNotAllowedError,
+    RequestEntityTooLargeError,
+    RequestParseError,
+)
+from nexom.core.log import AppLogger, sanitize_log_field
 
-from __app_name__.config import INFO_LOG, WARN_LOG, ERR_LOG, ACES_LOG
+from __app_name__.config import INFO_LOG, WARN_LOG, ERR_LOG, ACES_LOG, MAX_BODY_SIZE, TRUSTED_PROXY_COUNT
 from .router import routing
 
 
-# Logger (global)
-logger = AppLogger(
-    info=INFO_LOG,
-    warn=WARN_LOG,
-    error=ERR_LOG,
-    access=ACES_LOG,
-)
-
-
-def _ip(environ: dict) -> str:
-    xff = environ.get("HTTP_X_FORWARDED_FOR")
-    if isinstance(xff, str) and xff.strip():
-        return xff.split(",")[0].strip()
-    return str(environ.get("REMOTE_ADDR") or "-")
+logger = AppLogger(info=INFO_LOG, warn=WARN_LOG, error=ERR_LOG, access=ACES_LOG)
 
 
 def app(environ: dict, start_response: Callable) -> Iterable[bytes]:
     t0 = time.time()
-
     req: Request | None = None
     res: Response
 
     try:
-        req = Request(environ)
-        path = req.path
-        method = req.method
-
+        req = Request(environ, max_body_size=MAX_BODY_SIZE, trusted_proxy_count=TRUSTED_PROXY_COUNT)
         res = routing.handle(req)
-
-    except PathNotFoundError as e:
-        logger.warn(str(e))
-        res = ErrorResponse(404, "Not Found")
-
+    except PathNotFoundError:
+        # Log 404s only to access.log to avoid warning.log growth from anonymous scans (DATA-12).
+        res = ErrorResponse(404, http_status_codes[404])
+    except PathMethodNotAllowedError as e:
+        res = ErrorResponse(405, http_status_codes[405], headers=[("Allow", e.allow_header)])
+    except RequestEntityTooLargeError:
+        res = ErrorResponse(413, http_status_codes[413])
+    except RequestParseError:
+        res = ErrorResponse(400, http_status_codes[400])
     except Exception as e:
         logger.error(e)
-        res = ErrorResponse(500, "Internal Server Error")
+        res = ErrorResponse(500, http_status_codes[500])
 
     try:
         dt_ms = int((time.time() - t0) * 1000)
         method = req.method if req else str(environ.get("REQUEST_METHOD") or "-")
         path = (req.path if req else str(environ.get("PATH_INFO") or "")).lstrip("/")
-        ip = _ip(environ)
+        ip = req.client_ip if req else client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)
         ua = str(environ.get("HTTP_USER_AGENT") or "-")
-        logger.access(f'{ip} "{method} /{path}" {res.status_code} {dt_ms}ms "{ua}"')
+        logger.access(
+            f'{ip} "{sanitize_log_field(method)} /{sanitize_log_field(path)}" '
+            f'{res.status_code} {dt_ms}ms "{sanitize_log_field(ua)}"'
+        )
     except Exception:
         pass
 

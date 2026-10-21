@@ -13,7 +13,10 @@ from conftest import make_environ
 
 
 def test_router_get_post_and_options():
+    calls = []
+
     def handler(req, args):
+        calls.append(req.method)
         return Response("ok")
 
     routing = Router(
@@ -31,7 +34,9 @@ def test_router_get_post_and_options():
 
     req_opt = Request(make_environ(method="OPTIONS", path="/submit/"))
     res_opt = routing.handle(req_opt)
-    assert res_opt.status_code == 200
+    assert res_opt.status_code == 204
+    assert ("Allow", "OPTIONS, POST") in res_opt.headers
+    assert calls == ["GET", "POST"]
 
 
 def test_static_files(tmp_path: Path):

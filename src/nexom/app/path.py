@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from mimetypes import guess_type
 from pathlib import Path as _Path
@@ -10,6 +9,7 @@ from typing import Optional
 
 from ..core.error import (
     PathNotFoundError,
+    PathMethodNotAllowedError,
     PathlibTypeError,
     PathInvalidHandlerTypeError,
     PathHandlerMissingArgError,
@@ -192,9 +192,9 @@ class Get(Path):
 
 
 class Post(Path):
-    """POST-only route (plus OPTIONS for preflight)."""
+    """POST-only route."""
     def __init__(self, path: str, handler: Handler, name: str):
-        super().__init__(path, handler, name, methods={"POST", "OPTIONS"})
+        super().__init__(path, handler, name, methods={"POST"})
 
 
 # ====================
@@ -202,13 +202,27 @@ class Post(Path):
 # ====================
 
 class Static(Path):
-    """Represents a static file route."""
+    """Serve developer-managed assets; keep user uploads outside this root.
 
-    def __init__(self, path: str, static_directory: str, name: str) -> None:
+    Serve uploads through ParallelStorage with attachment disposition and
+    normalized extensions.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        static_directory: str,
+        name: str,
+        *,
+        index_file: str | None = "index.html",
+        allow_dotfiles: bool = False,
+    ) -> None:
         self._root = _Path(static_directory).resolve()
+        self.index_file = index_file
+        self.allow_dotfiles = allow_dotfiles
         prefix = path.strip("/")
         static_route = '{"*"}' if not prefix else f'{prefix}/{{"*"}}'
-        super().__init__(static_route, self._access, name)
+        super().__init__(static_route, self._access, name, methods={"GET", "HEAD"})
 
     def _access(self, request: Request, args: dict[str, Optional[str] | list[str]]) -> Response:
         """Serve a static file from the configured root."""
@@ -221,20 +235,34 @@ class Static(Path):
         except Exception:
             raise PathNotFoundError(request.path)
 
-        if not str(target).startswith(str(self._root) + os.sep) and target != self._root:
+        if target != self._root and not target.is_relative_to(self._root):
             raise PathNotFoundError(request.path)
 
         if target.is_dir():
-            target = (target / "index.html").resolve()
+            if self.index_file is None:
+                raise PathNotFoundError(request.path)
+            try:
+                target = (target / self.index_file).resolve()
+            except Exception:
+                raise PathNotFoundError(request.path)
+            if target != self._root and not target.is_relative_to(self._root):
+                raise PathNotFoundError(request.path)
 
-        if not target.exists() or not target.is_file():
+        if not target.is_file():
+            raise PathNotFoundError(request.path)
+
+        if not self.allow_dotfiles and any(
+            part.startswith(".") for part in target.relative_to(self._root).parts
+        ):
             raise PathNotFoundError(request.path)
 
         data = target.read_bytes()
-        mime_type, _ = guess_type(str(target))
+        mime_type = guess_type(str(target))[0] or "application/octet-stream"
+        if mime_type.startswith("text/"):
+            mime_type += "; charset=utf-8"
 
         headers = [
-            ("Content-Type", mime_type or "application/octet-stream"),
+            ("Content-Type", mime_type),
             ("Content-Length", str(len(data))),
         ]
         return Response(data, headers=headers)
@@ -269,36 +297,62 @@ class Router(list[Path]):
 
         Returns None if not found and raise_if_not_exist is False.
         """
-        method_u = method.upper() if method else None
-
-        matched_with_method: list[tuple[Path, int]] = []
-        matched_fallback: list[tuple[Path, int]] = []
+        candidates: list[tuple[Path, int]] = []
         for p in self:
             ok, score = p.match(request_path)
-            if not ok:
-                continue
+            if ok:
+                candidates.append((p, score))
 
-            # Method-specific Path has priority
-            if method_u and p.methods is not None:
-                if method_u in p.methods:
-                    matched_with_method.append((p, score))
-                continue
+        if not candidates:
+            if self.raise_if_not_exist:
+                raise PathNotFoundError(request_path)
+            return None
+        if method is None:
+            return max(candidates, key=lambda t: t[1])[0]
 
-            # Method-agnostic Path as fallback
-            matched_fallback.append((p, score))
-
-        if matched_with_method:
-            return max(matched_with_method, key=lambda t: t[1])[0]
-        if matched_fallback:
-            return max(matched_fallback, key=lambda t: t[1])[0]
-
-        if self.raise_if_not_exist:
-            raise PathNotFoundError(request_path)
-        return None
+        m = method.upper()
+        specific = [
+            (p, score) for p, score in candidates
+            if p.methods is not None
+            and (m in p.methods or (m == "HEAD" and "GET" in p.methods))
+        ]
+        agnostic = [(p, score) for p, score in candidates if p.methods is None]
+        if specific:
+            return max(specific, key=lambda t: t[1])[0]
+        if agnostic:
+            return max(agnostic, key=lambda t: t[1])[0]
+        raise PathMethodNotAllowedError(request_path, allowed=_allowed_methods(candidates))
 
     def handle(self, request: Request) -> Response:
         """Resolve and execute a route for the given request."""
-        path = self.get(request.path, method=request.method)
+        try:
+            path = self.get(request.path, method=request.method)
+        except PathMethodNotAllowedError as e:
+            if request.method == "OPTIONS":
+                return self._options_response(request, e)
+            raise
         if path is None:
             raise PathNotFoundError(request.path)
         return path.call_handler(request, tuple(self.middlewares))
+
+    def _options_response(self, request: Request, e: PathMethodNotAllowedError) -> Response:
+        """Run automatic OPTIONS through middleware without invoking a route."""
+        p = self.get(request.path)
+        args = p._read_args(request.path)
+        handler = lambda req, a: Response(b"", status=204, headers=[("Allow", e.allow_header)])
+        if self.middlewares:
+            handler = MiddlewareChain(tuple(self.middlewares)).wrap(handler)
+        response = handler(request, args)
+        # Preflight middleware may return before the terminal handler runs.
+        if not any(name.lower() == "allow" for name, _ in response.headers):
+            response.append_header("Allow", e.allow_header)
+        return response
+
+
+def _allowed_methods(candidates: list[tuple[Path, int]]) -> set[str]:
+    """Collect route methods, implicit HEAD, and automatic OPTIONS."""
+    allowed = {method for p, _ in candidates if p.methods is not None for method in p.methods}
+    if "GET" in allowed:
+        allowed.add("HEAD")
+    allowed.add("OPTIONS")
+    return allowed

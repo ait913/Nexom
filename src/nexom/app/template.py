@@ -6,7 +6,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.object_html_render import HTMLDoc, HTMLDocLib, ObjectHTML
+from ..core.object_html_render import (
+    HTMLDoc, HTMLDocLib, ObjectHTML, Markup, escape, safe_url, json_script,
+)
 from ..core.error import TemplateNotFoundError, TemplateInvalidNameError, TemplatesNotDirError
 
 _SEG_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -36,7 +38,7 @@ class _TemplateAccessor:
             raise AttributeError(part)
         return _TemplateAccessor(self._templates, f"{self._name}.{part}")
 
-    def __call__(self, **kwargs: str) -> str:
+    def __call__(self, **kwargs: object) -> Markup:
         return self._templates.render(self._name, **kwargs)
 
     def __repr__(self) -> str:
@@ -48,16 +50,17 @@ class ObjectHTMLTemplates:
     Loads all *.html templates under base_dir and renders them using ObjectHTML.
 
     Public API:
-        render("a.b", **kwargs) -> str
+        render("a.b", **kwargs) -> Markup
 
     Sugar:
         templates.a.b(**kwargs) -> render("a.b", **kwargs)
     """
 
-    def __init__(self, base_dir: str, reload: bool = False) -> None:
+    def __init__(self, base_dir: str, reload: bool = False, autoescape: bool = True) -> None:
         self.base_dir = str(base_dir)
         self._base_path = Path(self.base_dir).resolve()
         self.reload = reload
+        self.autoescape = autoescape
 
         if not self._base_path.exists() or not self._base_path.is_dir():
             raise TemplatesNotDirError(self.base_dir)
@@ -69,7 +72,7 @@ class ObjectHTMLTemplates:
             raise AttributeError(name)
         return _TemplateAccessor(self, name)
 
-    def render(self, name: str, **kwargs: str) -> str:
+    def render(self, name: str, **kwargs: object) -> Markup:
         if self.reload:
             self._rebuild_engine()
 
@@ -87,7 +90,7 @@ class ObjectHTMLTemplates:
         for entry in self._scan_templates(self._base_path):
             html_text = entry.path.read_text(encoding="utf-8")
             lib.append(HTMLDoc(entry.name, html_text))
-        self._engine = ObjectHTML(lib=lib)
+        self._engine = ObjectHTML(lib=lib, autoescape=self.autoescape)
 
     def _scan_templates(self, root: Path) -> list[TemplateEntry]:
         entries: list[TemplateEntry] = []

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import import_module, resources
 from pathlib import Path
 import re
@@ -13,10 +13,11 @@ import secrets
 @dataclass(frozen=True)
 class AppBuildOptions:
     """Options for generated app configuration."""
-    address: str = "0.0.0.0"
+    address: str = "127.0.0.1"
     port: int = 8080
     workers: int = 4
     reload: bool = False
+    trusted_proxy_count: int | None = None
 
 
 _NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
@@ -125,6 +126,11 @@ def create_app(
     """
     _validate_app_name(app_name)
     options = options or AppBuildOptions()
+    effective = options.trusted_proxy_count
+    if effective is None:
+        effective = 1 if gateway_config else 0
+    if effective < 0:
+        raise ValueError("trusted_proxy_count must be >= 0")
 
     project_root = Path(project_dir).expanduser().resolve()
     project_root.mkdir(parents=True, exist_ok=True)
@@ -174,6 +180,7 @@ def create_app(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__g_trusted_proxies__": str(effective),
         },
     )
     config_path.write_text(config_enabled, encoding="utf-8")
@@ -228,6 +235,11 @@ def create_auth(
 ) -> Path:
     """Create a new Nexom auth app scaffold."""
     options = options or AppBuildOptions(port=7070)
+    effective = options.trusted_proxy_count
+    if effective is None:
+        effective = 0
+    if effective < 0:
+        raise ValueError("trusted_proxy_count must be >= 0")
     if master_user_login_password is None:
         master_user_login_password = secrets.token_urlsafe(14)
 
@@ -257,6 +269,7 @@ def create_auth(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__g_trusted_proxies__": str(effective),
             "__master_user__": str(master_user),
         },
     )
@@ -294,6 +307,11 @@ def create_config(
     """
     _validate_app_name(app_name)
     options = options or AppBuildOptions(port=7070 if auth else 8080)
+    effective = options.trusted_proxy_count
+    if effective is None:
+        effective = 0
+    if effective < 0:
+        raise ValueError("trusted_proxy_count must be >= 0")
 
     project_root = Path(project_dir).expanduser().resolve()
     app_root = project_root / app_name
@@ -326,6 +344,7 @@ def create_config(
             "__g_port__": str(options.port),
             "__g_workers__": str(options.workers),
             "__g_reload__": "True" if options.reload else "False",
+            "__g_trusted_proxies__": str(effective),
             "__master_user__": str(master_user),
         },
     )
@@ -376,6 +395,13 @@ def start_project(
     # main app + auth app
     main_opt = main_options or AppBuildOptions()
     auth_opt = auth_options or AppBuildOptions(port=7070)
+    if main_opt.trusted_proxy_count is None:
+        main_opt = replace(main_opt, trusted_proxy_count=1 if gateway != "none" else 0)
+    effective = auth_opt.trusted_proxy_count
+    if effective is None:
+        effective = 0
+    if effective < 0:
+        raise ValueError("trusted_proxy_count must be >= 0")
     if master_user_login_password is None:
         master_user_login_password = secrets.token_urlsafe(14)
 
@@ -411,6 +437,7 @@ def start_project(
             "__g_port__": str(auth_opt.port),
             "__g_workers__": str(auth_opt.workers),
             "__g_reload__": "True" if auth_opt.reload else "False",
+            "__g_trusted_proxies__": str(effective),
             "__master_user__": str(master_user),
         },
     )
