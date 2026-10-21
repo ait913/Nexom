@@ -41,7 +41,8 @@ from nexom.core.error import (
     ResponseRedirectExternalError,
     TemplateUnsafeSlotError,
 )
-from nexom.core.object_html_render import HTMLDoc, ObjectHTML, ObjectHTMLTemplates
+from nexom.core.object_html_render import HTMLDoc, ObjectHTML
+from nexom.app.template import ObjectHTMLTemplates
 
 MiB = 1024 * 1024
 SEC_HEADERS = [
