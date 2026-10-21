@@ -11,7 +11,7 @@
 |---|---|---|
 | **本 doc 専属** | `src/nexom/app/auth.py`, `src/nexom/app/user.py`, `src/nexom/templates/auth.py`, `src/nexom/assets/auth/{config,wsgi,gunicorn.conf}.py`, `src/nexom/assets/auth_page/{login,signup}.html`, `tests/test_auth_and_db.py` | |
 | **例外的に触る** | `src/nexom/core/error.py` の Auth 節 (`class AuthMissingFieldError` 〜 `_status_for_auth_error`、現 258-329 行) | A11/A12/A13 追加と `field` 属性。http doc が同ファイルの別節 (HTTP 系) を触る可能性あり → 節が違うので textual conflict なし |
-| 例外的に触る | `tests/conftest.py` `make_environ` に `"REMOTE_ADDR": "127.0.0.1"` を 1 キー追加 | loopback ガード (§5 G) のため。他 doc のテストに副作用なし |
+| 例外的に触る | `tests/conftest.py` `make_environ` に `"REMOTE_ADDR": "127.0.0.1"` を 1 キー追加 | loopback ガード (§5 G) のため。`tests/test_http_hardening.py` の Q19 / X09 / X12 は REMOTE_ADDR 無しを前提にしているので、同 3 テストは `env.pop("REMOTE_ADDR")` で明示的に外す (§9.1) |
 | 例外的に触る | `tests/test_templates_and_buildtools.py` 39-43 行の `cfg` アサーション | `MASTER_PASSWORD` 定数の固定を反転。http doc が同ファイルの CLI 既定テストを触るなら別関数 |
 | **触らない** | `app/cookie.py`, `app/request.py`, `app/response.py`, `app/path.py`, `app/middleware.py`, `core/object_html_render.py`, `assets/app/**`, `buildTools/build.py`, `__main__.py` | http doc |
 | 触らない | `app/parallel_storage.py`, `app/db.py`, `core/log.py`, `pyproject.toml`, `src/nexom/__init__.py` (`__version__`) | storage doc (版番号 1.2.0 の記入も storage doc) |
@@ -22,7 +22,7 @@
 |---|---|---|---|
 | `Cookie(name, value, *, max_age: int \| None, expires, path="/", domain, secure=True, http_only=True, same_site="Lax")` + 削除ヘルパ (Max-Age=0) | http | `_nxt` の発行・削除 (§5 K) | 削除ヘルパの名称を `Cookie.delete(name, *, path="/", domain=None) -> Cookie` と仮称。異なる名で確定したら本 doc の K-2 をその名に読み替える |
 | 自動エスケープ (`Markup`/`Raw` 相当だけ素通し、レンダ済み出力は Raw 扱い) | http | `templates/auth.py` のスロット表 (§6.3) | なし (全スロットがユーザ入力でない) |
-| プロキシ信頼 (bind 既定 127.0.0.1、XFF は信頼プロキシ設定時のみ) | http | AuthPages が末端クライアント IP を得る手段、auth 雛形 `_ip()` | **`Request.client_ip: str` (解決済み末端 IP) を Request に載せること**。無いと AuthPages のレート制限 IP 軸が「アプリサーバーの 127.0.0.1」1 バケツに潰れる (§5 L-3) |
+| プロキシ信頼 (bind 既定 127.0.0.1、XFF は信頼プロキシ設定時のみ) | http | AuthPages が末端クライアント IP を得る手段、auth 雛形の access ログ IP (`client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)`、§6.2) | **`Request.client_ip: str` (解決済み末端 IP) を Request に載せること**。無いと AuthPages のレート制限 IP 軸が「アプリサーバーの 127.0.0.1」1 バケツに潰れる (§5 L-3) |
 | `sanitize_log_field(s: str) -> str` (`nexom.core.log`) | storage | AuthLogger に渡す subject/detail を全て通す (§8) | **`AuthLogger.event(action: str, *, subject: str, ip: str \| None = None, detail: str \| None = None) -> None` を追加**し行形式 `[ts] [ACTION] subject=.. ip=.. detail=..` (detail 省略時は従来形式)。既存 4 メソッドは維持 |
 
 ## 1. 目的
@@ -39,7 +39,7 @@
 | AUTH-04 | レート制限・ロックアウト皆無。[実測] 誤 pw 1 回 ≈ 0.04-0.05 s CPU、sync worker 4 → 毎秒 100 弱で飽和、verify が timeout → 全ページ 500 | 2 軸 (IP / アカウント) の固定窓カウンタ + ロック (SQLite `auth_attempts`、**ハッシュ前に試行枠を予約**して閾値を厳密上限に)、**プロセス内の時間ベース PBKDF2 ゲージ** (直近 1 秒窓の実測 hash 時間が 50% を超えたら 429) で login が verify を道連れにしない。安い検査を PBKDF2 の前に置く。再認証経路 (`update/password`, master 操作) も同じロック・ゲージ・長さ上限を通る | §5 L, S, H, M |
 | AUTH-05 | `password="1"` で 201、`user_id="<img src=x onerror=alert(1)>"` で 201 [実測] | `AuthPolicy` で user_id 正規表現 / public_name 長さ・禁止文字 / password 最小 8 文字・最大 256 byte。新規作成・更新時のみ適用 (既存行は免除) | §4.1, §5 S |
 | AUTH-06 | 無認証 `resolve/pid` が存在確認 + pid を返す。login は未知 0.0001 s / 既知誤 pw 0.05 s [実測 500 倍]。無効化済は pw 不問で A04 | `resolve/pid` **削除** (404)。未知ユーザーでもダミー PBKDF2。`is_active` 判定はパスワード一致の**後** | §5 L-6〜L-8, T-1 |
-| AUTH-07 / DATA-10 / HTTP-07 | AuthService に呼び出し元検査なし。`create-auth` 既定 0.0.0.0 | `AuthService(allowed_clients=("127.0.0.1","::1"))` の REMOTE_ADDR ガード (403 A13)。CLI 既定は http doc。雛形 config に `ALLOWED_CLIENTS` / `TRUSTED_PROXIES` | §5 G, §6 |
+| AUTH-07 / DATA-10 / HTTP-07 | AuthService に呼び出し元検査なし。`create-auth` 既定 0.0.0.0 | `AuthService(allowed_clients=("127.0.0.1","::1"))` の REMOTE_ADDR ガード (403 A13)。CLI 既定は http doc。雛形 config に `ALLOWED_CLIENTS` / `TRUSTED_PROXY_COUNT` (auth は既定 0) | §5 G, §6 |
 | AUTH-08 | 任意ユーザーが任意 group_id を先取り、`group/auth` が非メンバーにも level を返す | `group/auth` は「自分の pid」または「自分がその group の level ≥ 1 のメンバー」のときだけ応答、他は A13。group_id / name に形式検証。**先取り自体は許容** (§11 不採用案 N-6) | §5 P |
 | AUTH-09 | `level: true` が int 扱いで 1 保存 [実測] | `bool` を A12 で拒否 | §5 P-3 |
 | AUTH-10 | master が自分を deactivate → 回復不能 [実測] | target == master → A13。起動時 `ensure_master_user` が `is_active=1, is_master=1` を自己修復。`master/users/activate` 追加 | §5 M |
@@ -51,7 +51,7 @@
 | AUTH-17 | sessions 行が無限蓄積 | login ごとに期限切れ・revoked 行を DELETE、1 ユーザー最大 20 セッション | §5 L-11 |
 | AUTH-18 | `UserDatabaseManager` が pid を無検証でファイル名に | `[A-Za-z0-9_-]{16,64}` + `users_dir` 配下検査 | §5 U |
 | AUTH-19 | master 判定が文字列比較、`is_master` 未使用、`created_at` NULL | `is_master=1` で判定、INSERT を列名指定にして `created_at` DEFAULT を効かせる | §3, §5 M-1 |
-| AUTH-20 | `_ip()` が XFF 先頭を無条件信用 | 雛形 `_ip()` は `REMOTE_ADDR ∈ TRUSTED_PROXIES` のときだけ XFF の**末尾**要素 | §6.2 |
+| AUTH-20 | `_ip()` が XFF 先頭を無条件信用 | 雛形はローカル `_ip()` を持たず、http doc §14.6 の `client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)` を呼ぶ (auth は既定 0 = XFF を見ない) | §6.2 |
 | AUTH-21 | AuthClient: 必須キー欠落で `KeyError`、redirect 追従、`None` → `"None"` | 欠落/型不正 → A09、3xx を追従しない、`user_agent` は `None` を保つ | §5 C |
 
 ## 3. データモデル
@@ -361,7 +361,7 @@ class UserDatabaseManager(DatabaseManager):
 | L-14 | 誤り 4 回 → 正しい pw 成功 → 誤り 4 回 | 2 回目の 4 連続でもロックなし (成功でアカウントカウンタ削除) |
 | L-15 | 同一 `client_ip` から異なる存在しない user_id で 30 回失敗 → 31 回目 (どの user_id でも) | 31 回目: 429 A11、`login_ip:203.0.113.7.locked_until=now+900`。ログ `LOCKOUT subject=login_ip:203.0.113.7`。別 IP `203.0.113.8` からの `alice` 正 pw は 200 |
 | L-16 | 同一 IP から成功 100 回連続 | 全て 200 (成功は IP 軸に数えない)。`login_ip:` は予約 (+1) → 成功で `_release` (−1) → count 0 の行は削除されるので、終了時に行は残らない |
-| L-17 | `policy=AuthPolicy(hash_busy_ratio=0.0)` の AuthService で、存在しない user 宛の失敗を 3 連続 (1 秒以内) | 1 回目 401 A03 (ハッシュ実行)、**2・3 回目 429 A11** (直近窓の hash 時間 > 0 なのでハッシュしない)。`auth_attempts` は 1 回目の予約分 (count=1) だけで 2・3 回目は行を触らない。ログ `RATE_LIMITED subject=gauge detail=reason=busy`。verify は同時に 200 で応答する (ゲージは PBKDF2 だけに掛かる)。`hash_window_sec` 経過後の 4 回目は 401 A03 |
+| L-17 | `policy=AuthPolicy(hash_busy_ratio=0.0)` の AuthService で、存在しない user 宛の失敗を 3 連続 (1 秒以内) | 1 回目 401 A03 (ハッシュ実行)、**2・3 回目 429 A11** (直近窓の hash 時間 > 0 なのでハッシュしない)。`auth_attempts` は 1 回目の予約分 (count=1) だけで 2・3 回目は行を触らない。ログ `RATE_LIMITED subject=gauge detail=reason=busy`。verify は同時に 200 で応答する (ゲージは PBKDF2 だけに掛かる)。`hash_window_sec` 経過後の 4 回目は 401 A03。前提: 起動時の master 作成ハッシュ (M-3) はゲージに計上しない — `AuthService.__init__` の末尾で計測ログ (`_hash_log`) をクリアする。これが無いと直後の 1 回目が 429 になる |
 | L-17b | 既定 `hash_busy_ratio=0.5` で、ハッシュ 1 回が d ms の機械 (本機 d≈124) | 判定は「ハッシュ前に、直近窓の合計 > 500 ms なら拒否」なので、k 回目が通る条件は `(k-1)·d ≤ 500`。d=124 なら 1〜5 回目が通り (4 回で 496 ms)、6 回目 (合計 620 ms) で 429。Reviewer は自機の d を測って `floor(500/d)+1` 回目までが通り、その次が 429 になることを確認する |
 | L-18 | `legacy_bob` 正しい pw | 200。`users.password_hash` が `pbkdf2_sha256$600000$…` に、`password_salt=''` に更新 (透過再ハッシュ)。2 回目の login も 200 で hash 不変 |
 | L-19 | `legacy_bob` 誤 pw | 401 A03、hash 不変 (legacy のまま) |
@@ -540,7 +540,7 @@ nginx 雛形・aisaba の vhost は `proxy_set_header Host $host` を送って�
 |---|---|---|
 | W-1 | `Cookie: a<b=1` (不正キー) を送る | 500 `{"ok": false, "error": "InternalError"}` が **`start_response` 経由で**返る (gunicorn の素の 500 でない)。error.log に traceback。**現状**: `NameError` |
 | W-2 | 正常リクエスト | access.log に `<ip> "POST /login" 200 <ms>ms "<ua>"` (形式変更なし) |
-| W-3 | `REMOTE_ADDR=127.0.0.1`、`X-Forwarded-For: 1.2.3.4`、`TRUSTED_PROXIES=()` | access.log の ip は `127.0.0.1` (XFF 無視)。`TRUSTED_PROXIES=("127.0.0.1",)` なら `1.2.3.4` (末尾要素)。**現状**: 常に XFF 先頭 |
+| W-3 | `REMOTE_ADDR=127.0.0.1`、`X-Forwarded-For: 1.2.3.4`、`TRUSTED_PROXY_COUNT=0` (auth 既定) | access.log の ip は `127.0.0.1` (XFF 無視)。`TRUSTED_PROXY_COUNT >= 1` のときの採用規則は http doc §9 / §17.5 X10〜X12 に従う (本 doc では再定義しない)。**現状**: 常に XFF 先頭 |
 
 ## 6. 生成雛形 (assets/auth, assets/auth_page)
 
@@ -553,33 +553,25 @@ MASTER_USER: str = "__master_user__"
 # 接続を許可する呼び出し元 (REMOTE_ADDR)。アプリと同一ホストなら loopback だけでよい。
 # コンテナ間で使う場合はアプリ側のアドレスを足す。None でガード無効。
 ALLOWED_CLIENTS: tuple[str, ...] | None = ("127.0.0.1", "::1")
-# X-Forwarded-For を信用するプロキシ (REMOTE_ADDR)。auth は非公開なので既定は空。
-TRUSTED_PROXIES: tuple[str, ...] = ()
+# 前段の信頼プロキシ段数 (http doc §14.6)。auth は非公開 (loopback 直結) なので既定 0 = X-Forwarded-For を見ない。
+TRUSTED_PROXY_COUNT: int = __g_trusted_proxies__
 ```
 
-`MASTER_PASSWORD` 行は削除。他の行 (project / gunicorn / logger) は不変。`build.py` の `_replace_many` 辞書に変更は不要 (新規プレースホルダを導入しない)。
+`MASTER_PASSWORD` 行は削除。他の行 (project / gunicorn / logger) は不変。`__g_trusted_proxies__` プレースホルダの置換 (`create-auth` / `start-project --auth-*` では既定 `0`) は http doc の `build.py` 変更に含まれる。
 
 ### 6.2 `assets/auth/wsgi.py` (全面書き直し、`assets/app/wsgi.py` と同構造)
 
 ```python
-from nexom.app.request import Request
+from nexom.app.request import Request, client_ip        # client_ip は http doc §14.6 のプロキシ信頼契約
 from nexom.app.response import Response, JsonResponse
 from nexom.core.log import AppLogger
 from nexom.app.auth import AuthService
 from auth.config import (AUTH_DB, INFO_LOG, WARN_LOG, ERR_LOG, ACES_LOG, AUTH_LOG,
-                         MASTER_USER, ALLOWED_CLIENTS, TRUSTED_PROXIES)
+                         MASTER_USER, ALLOWED_CLIENTS, TRUSTED_PROXY_COUNT)
 
 logger = AppLogger(info=INFO_LOG, warn=WARN_LOG, error=ERR_LOG, access=ACES_LOG)
 service = AuthService(AUTH_DB, AUTH_LOG, master_user=MASTER_USER, master_login_password="",
                       allowed_clients=ALLOWED_CLIENTS)
-
-def _ip(environ: dict) -> str:
-    remote = str(environ.get("REMOTE_ADDR") or "-")
-    if remote in TRUSTED_PROXIES:
-        xff = environ.get("HTTP_X_FORWARDED_FOR")
-        if isinstance(xff, str) and xff.strip():
-            return xff.split(",")[-1].strip()
-    return remote
 
 def app(environ, start_response):
     t0 = time.time()
@@ -590,14 +582,14 @@ def app(environ, start_response):
         logger.error(e)
         res = JsonResponse({"ok": False, "error": "InternalError"}, status=500)
     try:
-        ... access ログ (現行と同じ 1 行形式、ip は _ip(environ))
+        ... access ログ (現行と同じ 1 行形式、ip は client_ip(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT))
     except Exception:
         pass
     start_response(res.status_text, res.headers)
     return [res.body]
 ```
 
-http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く場合、`_ip` はそれを呼ぶ 1 行に置き換える (規則は同じ: 信頼プロキシからの接続のときだけ XFF 末尾)。`gunicorn.conf.py` は不変。
+ローカルの `_ip()` は置かない (`assets/app/wsgi.py` と同じく http doc の `client_ip` を使う。採用規則は http doc §9 / §17.5 X10〜X12)。`gunicorn.conf.py` は不変。
 
 ### 6.3 `templates/auth.py` と `auth_page/*.html` のスロット表 (自動エスケープ契約)
 
@@ -617,7 +609,7 @@ http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く�
   - `"A13": "この操作は許可されていません。ページを再読み込みしてください。"`
   - `getErrorMessage(code, field)`: `code === "A12" && field` なら `A12.<field>` を優先、無ければ `A12`
 - `setError(code, field)` と呼び出し側 `setError(r.data.error, r.data.field)` に変更
-- `signup.html` の input: `user_id` に `pattern="[a-z0-9][a-z0-9_.\-]{2,31}" minlength="3" maxlength="32"`、`public_name` に `maxlength="64"`、`password`/`password2` に `minlength="8"`。ラベル直下に補助文 `<p class="hint">半角小文字英数字と _ . -、3〜32 文字</p>` (user_id) / `8 文字以上` (password)。`.hint` は `.sub` と同じ 11px / `var(--muted)`
+- `signup.html` の input: `user_id` に `pattern="[a-z0-9][a-z0-9_.\-]{2,31}" minlength="3" maxlength="32"`、`public_name` に `maxlength="64"`、`password`/`password2` に `minlength="8"`。ラベル直下に補助文 `<p class="hint">半角小文字英数字と _ . -、3〜32 文字</p>` (user_id) / `8 文字以上` (password)。`.hint` は 11px (`.sub` の 12px より 1px 小) / `var(--muted)`
 - `login.html` の input は属性を足さない (legacy ID のログインを塞がない)
 
 ## 7. UI/UX (最小)
@@ -632,7 +624,7 @@ http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く�
 | ACTION | 契機 | subject | ip | detail |
 |---|---|---|---|---|
 | `LOGIN_OK` | L-1 | user_id | client_ip | — |
-| `LOGIN_NG` | L-6/7/9, H-3, M-7 | user_id | client_ip (再認証時は `-`) | `reason=invalid` / `disabled` / `reauth` |
+| `LOGIN_NG` | L-6/7/9, H-3, M-7 | user_id | client_ip (再認証時も body の `client_ip`) | `reason=invalid` / `disabled` / `reauth` |
 | `LOCKOUT` | L-10, L-15, S-13, H-3 (5 回目), M-7 (5 回目) | key (`login_user:alice` 等) | client_ip | `until=<epoch>` |
 | `RATE_LIMITED` | L-11, L-7b, L-17, S-13b, S-16, H-3b〜d, M-7b | key (ロック中 / 予約超過) または `gauge` (ゲージ超過) | client_ip | `reason=locked` / `reserved` / `busy` |
 | `SIGNUP` | S-1 | user_id | client_ip | — |
@@ -670,8 +662,8 @@ http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く�
 | 同 276 `"master_password": "NexomWebFramework"` | | `"login_password": "master_login_pw"` |
 | 同 319-325 `/resolve/pid` → 200 | | 404 `error == "NotFound"` |
 | 同 228 non-100 delete → 401 | | 403 |
-| `conftest.py` `make_environ` | REMOTE_ADDR なし | `"REMOTE_ADDR": "127.0.0.1"` を既定に追加 (G-4 のテストは `environ.pop("REMOTE_ADDR")`) |
-| `test_templates_and_buildtools.py:43` | `'MASTER_PASSWORD: str = "NexomWebFramework"' in cfg` | `"MASTER_PASSWORD" not in cfg` と `'ALLOWED_CLIENTS: tuple[str, ...] | None = ("127.0.0.1", "::1")' in cfg` と `"TRUSTED_PROXIES: tuple[str, ...] = ()" in cfg` |
+| `conftest.py` `make_environ` | REMOTE_ADDR なし | `"REMOTE_ADDR": "127.0.0.1"` を既定に追加。REMOTE_ADDR 無しを前提にするテストは `env.pop("REMOTE_ADDR")` で明示的に外す: 本 doc の G-4、および `tests/test_http_hardening.py` の Q19 / X09 / X12 (http doc 側のテスト。追加キーで落ちるので同じ pop を入れる) |
+| `test_templates_and_buildtools.py:43` | `'MASTER_PASSWORD: str = "NexomWebFramework"' in cfg` | `"MASTER_PASSWORD" not in cfg` と `'ALLOWED_CLIENTS: tuple[str, ...] | None = ("127.0.0.1", "::1")' in cfg` と `"TRUSTED_PROXY_COUNT: int = 0" in cfg` |
 | 同 24-30 `test_auth_pages_login_get` | GET のみ | 変更なし (通る) |
 
 `test_core.py` / `test_request_response.py` / `test_router_static_middleware.py` は auth コードを参照しない (grep 済み)。
@@ -694,7 +686,7 @@ http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く�
 1. バックアップ: `sqlite3 <DATA_DIR>/db/auth/auth.db ".backup auth-pre-1.2.0.db"` (WAL を含めて 1 ファイルに)
 2. `pip install -U nexom==1.2.0` (venv)
 3. `wsgi.py` を §6.2 の形に差し替える (最低限: `except Exception as e` と `start_response` の修正。`AuthService(AUTH_DB, AUTH_LOG)` は引数既定値で 1.2.0 でもそのまま動く — `allowed_clients` 既定 loopback、アプリは `http://127.0.0.1:7070` で接続するので通る)
-4. `config.py` に `MASTER_PASSWORD` があれば削除 (残っていても未参照で害はない)。`ALLOWED_CLIENTS` / `TRUSTED_PROXIES` は任意 (未定義なら wsgi.py 側で import しない形にする)
+4. `config.py` に `MASTER_PASSWORD` があれば削除 (残っていても未参照で害はない)。`ALLOWED_CLIENTS` / `TRUSTED_PROXY_COUNT` は任意 (未定義なら wsgi.py 側で import しない形にする。`TRUSTED_PROXY_COUNT` 未定義時は `client_ip(environ)` の既定 0)
 5. `systemctl restart nexom@auth` → 初回起動で schema v2 へ自動移行 (§3.3)、master 行に `is_master=1, is_active=1`
 6. 確認: `curl -s -X POST http://127.0.0.1:7070/verify -H 'content-type: application/json' -d '{"token":"x"}'` → `{"active": false}`。別ホストから同じ要求 → 接続不可 (bind) または 403 A13
 7. 既存ユーザー: そのままログイン可、初回成功時に 600k へ再ハッシュ。`user_id` の新規約は既存行に適用しない (大文字 ID 等はそのまま)
@@ -711,7 +703,7 @@ http doc がプロキシ信頼の共通関数を `nexom.app.request` に置く�
 
 ### 10.4 Bloom 等の新規アプリ
 
-`nexom start-project` の生成物が 1.2.0 既定。**推奨は同一ホストの loopback に限定** (`ALLOWED_CLIENTS` 既定のまま)。別ホスト/コンテナに分ける場合は、(a) ネットワークを private に閉じる、**かつ** (b) auth の前に TLS 終端 (nginx 等の reverse proxy) を置いてアプリ側 `AUTH_SERVER` を `https://` にする — AuthClient は `urllib` なので `https://` をそのまま扱える。この構成では `ALLOWED_CLIENTS` に proxy のアドレス、`TRUSTED_PROXIES` に同じアドレスを設定する。平文 HTTP を private network だけに頼って別ホストへ流す構成は採らない。
+`nexom start-project` の生成物が 1.2.0 既定。**推奨は同一ホストの loopback に限定** (`ALLOWED_CLIENTS` 既定のまま)。別ホスト/コンテナに分ける場合は、(a) ネットワークを private に閉じる、**かつ** (b) auth の前に TLS 終端 (nginx 等の reverse proxy) を置いてアプリ側 `AUTH_SERVER` を `https://` にする — AuthClient は `urllib` なので `https://` をそのまま扱える。この構成では `ALLOWED_CLIENTS` に proxy のアドレス、`TRUSTED_PROXY_COUNT` に proxy の段数 (1 段なら `1`) を設定する。平文 HTTP を private network だけに頼って別ホストへ流す構成は採らない。
 
 ## 11. 不採用案
 
