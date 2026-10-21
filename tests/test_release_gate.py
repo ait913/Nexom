@@ -945,3 +945,104 @@ def test_RG_DB9b_outer_failure_discards_released_inner_work(tmp_path):
                 d.execute("INSERT INTO t VALUES (1)")
             raise RuntimeError
     assert _xs(p) == []
+
+
+# ================================================================ E32 / E33 / E34 (tokenizer rounds 4-5, doc-only regression)
+_E_X = "<i>&"
+_E_ESC = "&lt;i&gt;&amp;"
+
+_E32_SCRIPT_BODY = [
+    "<svg><foreignObject><script>//</foreignObject>{{x}}</script></foreignObject></svg>",
+    "<!--><script>//-->{{x}}</script>",
+    "<!---><script>//-->{{x}}</script>",
+    "<svg><![cdata[><script>//]]>{{x}}</script></svg>",
+    "<script><!--<script>//</script>{{x}}</script>",
+    "<SCRIPT><!--<SCRIPT>//</SCRIPT>{{x}}</SCRIPT>",
+    "<svg><p><script>//</svg>{{x}}</script>",
+    "<svg><desc><script>{{x}}</script></desc></svg>",
+    "<math><mi><script>//</mi>{{x}}</script></math>",
+    "<!-- a --!><script>//-->{{x}}</script>",
+    '<!x a="><script>">{{x}}</script>',
+]
+
+
+@pytest.mark.parametrize("html", _E32_SCRIPT_BODY)
+def test_RG_E32_script_body_bypasses_rejected_at_load(html):
+    with pytest.raises(TemplateUnsafeSlotError) as ei:
+        ObjectHTML(HTMLDoc("t", html))
+    assert ei.value.code == "OH06" and "script/style body" in str(ei.value)
+
+
+@pytest.mark.parametrize("html", [
+    "<svg><script><![CDATA[//</script>{{x}}]]></script></svg>",
+    "<svg><![CDATA[{{x}}]]></svg>",
+])
+def test_RG_E32_cdata_slots_rejected_at_load(html):
+    with pytest.raises(TemplateUnsafeSlotError) as ei:
+        ObjectHTML(HTMLDoc("t", html))
+    assert ei.value.code == "OH06" and "cdata" in str(ei.value).lower()
+
+
+@pytest.mark.parametrize("html", [
+    "<svg><foreignObject><script>//</foreignObject>{{x}}</script></foreignObject></svg>",
+    "<!--><script>//-->{{x}}</script>",
+    "<svg><![cdata[><script>//]]>{{x}}</script></svg>",
+    "<svg><![CDATA[{{x}}]]></svg>",
+    "<script><!--<script>//</script>{{x}}</script>",
+    '<textarea><b a="</textarea><script>">{{x}}</script>',
+    "<xmp>{{x}}</xmp>",
+])
+def test_RG_E32_E_R9_rejected_even_with_autoescape_false(html):
+    with pytest.raises(TemplateUnsafeSlotError):
+        ObjectHTML(HTMLDoc("t", html), autoescape=False)
+
+
+# ---- E34 negatives
+@pytest.mark.parametrize("tag", ["textarea", "title", "xmp", "iframe", "noembed", "noscript"])
+def test_RG_E34_fake_attr_in_rcdata_rawtext_then_script_rejected(tag):
+    html = f'<{tag}><b a="</{tag}><script>">{{{{x}}}}</script>'
+    with pytest.raises(TemplateUnsafeSlotError) as ei:
+        ObjectHTML(HTMLDoc("t", html))
+    assert ei.value.code == "OH06"
+    msg = str(ei.value).lower()
+    assert "script/style body" in msg or "rawtext body" in msg
+
+
+@pytest.mark.parametrize("html", [
+    "<noscript>{{x}}</noscript>",
+    "<xmp>{{x}}</xmp>",
+    "<plaintext>{{x}}",
+])
+def test_RG_E34_rawtext_body_rejected(html):
+    with pytest.raises(TemplateUnsafeSlotError) as ei:
+        ObjectHTML(HTMLDoc("t", html))
+    assert ei.value.code == "OH06" and "rawtext body" in str(ei.value).lower()
+
+
+# ---- E33 / E34 positives (accepted, DATA/RCDATA => escaped) + negative control
+@pytest.mark.parametrize("html,pre,post", [
+    ("<script>a<!--b</script><p>{{x}}</p>", "<script>a<!--b</script><p>", "</p>"),
+    ("<script><!--<script></script>--></script><p>{{x}}</p>", "<script><!--<script></script>--></script><p>", "</p>"),
+    ("<svg><title>{{x}}</title></svg>", "<svg><title>", "</title></svg>"),
+    ("<svg><foreignObject><p>{{x}}</p></foreignObject></svg>", "<svg><foreignObject><p>", "</p></foreignObject></svg>"),
+    ("<svg><p>{{x}}</p></svg>", "<svg><p>", "</p></svg>"),
+    ("<textarea>{{x}}</textarea>", "<textarea>", "</textarea>"),
+    ("<title>{{x}}</title>", "<title>", "</title>"),
+    ("<xmp></xmp>{{x}}", "<xmp></xmp>", ""),
+    ("<TEXTAREA>a</TEXTAREA >{{x}}", "<TEXTAREA>a</TEXTAREA >", ""),
+    ("<!DOCTYPE html><p>{{x}}</p>", "<!DOCTYPE html><p>", "</p>"),
+    ('<?xml version="1.0"?><p>{{x}}</p>', '<?xml version="1.0"?><p>', "</p>"),
+    ('<script src="x.js"></script><p>{{x}}</p>', '<script src="x.js"></script><p>', "</p>"),
+])
+def test_RG_E33_E34_accepted_and_value_escaped(html, pre, post):
+    out = str(_t(html).t(x=_E_X))
+    assert out == pre + _E_ESC + post, out
+    assert _E_X not in out
+
+
+def test_RG_E34_negative_control_body_and_textarea_both_escape_same_value():
+    body = str(_t("<p>{{x}}</p>").t(x=_E_X))
+    ta = str(_t("<textarea>{{x}}</textarea>").t(x=_E_X))
+    assert body == "<p>&lt;i&gt;&amp;</p>"
+    assert ta == "<textarea>&lt;i&gt;&amp;</textarea>"
+    assert "&lt;" in ta and "<i>" not in ta
