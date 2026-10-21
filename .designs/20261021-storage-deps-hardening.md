@@ -236,7 +236,7 @@ IMAGE_CONTENT_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "ima
 
 | 変更前 | 変更後 |
 |---|---|
-| `__init__(db_file, auto_commit=True)` | `__init__(db_file: str, auto_commit: bool = True, *, file_mode: int \| None = 0o600)`。`connect()` 直後 (PRAGMA の前) に `os.chmod(db_file, file_mode)`。対象外: `":memory:"`、`file:` で始まる URI、`file_mode=None`。`OSError` は `DBOperationalError(str(e))`。WAL / SHM は SQLite が本体の mode を継承する (実測: 本体 0600 → `-wal` / `-shm` も 0600) |
+| `__init__(db_file, auto_commit=True)` | `__init__(db_file: str, auto_commit: bool = True, *, file_mode: int \| None = 0o600)`。`connect()` 直後 (PRAGMA の前) に `os.chmod(db_file, file_mode)`。対象外: `":memory:"`、`file:` で始まる URI、`file_mode=None`。`OSError` は `DBOperationalError(str(e))`。WAL / SHM は SQLite が本体の mode を継承する (実測: 本体 0600 → `-wal` / `-shm` も 0600)。**接続後の初期化 (chmod / PRAGMA / サブクラスの `_init` = テーブル作成・移行) が例外を上げたら、`self._conn.close()` して `_conn` / `_cursor` を None に戻した上で再送出する** (接続リークと、半端な状態のオブジェクトが残るのを防ぐ、RG09) |
 | `execute(sql, *args)`: `SELECT` で始まる時だけ fetchall | `self._cursor.description is not None` のとき fetchall (PRAGMA / WITH / RETURNING も行を返す)。INSERT / UPDATE / DELETE は従来どおり None |
 
 サブクラス (`AuthDBM`, `UserDatabaseManager`) は位置引数で `super().__init__` を呼んでいるので既定 0600 が自動で効く (横断効果、§8-5)。
@@ -386,7 +386,7 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 
 `expected_chunk_size(size, total_chunks, count)`: `chunk = ceil(size / total_chunks)`; `count < total_chunks - 1` → `chunk`、最後は `size - chunk * (total_chunks - 1)`。
 
-`register(filename, size, pid, total_chunks, sha256)` の検査順: (1) `pid` が非空 str でなければ `PsArgmentsError("pid")`; (2) `size` が `int` (bool 不可) で `> 0` でなければ `PsArgmentsError("size")`; `size > max_upload_size` → `PsUploadTooLargeError(size, max_upload_size)`; (3) `total_chunks` が `int` で `>= 1` でなければ `PsArgmentsError("total_chunks")`; (4) `ceil(size/total_chunks) > chunk_max_size` → `PsArgmentsError("total_chunks")`; `total_chunks > max(1, ceil(size / min_chunk_size))` → `PsArgmentsError("total_chunks")`; (5) `SHA256_RE` 不一致 → `PsArgmentsError("sha256")`; (6) `count_active(pid) >= max_active_uploads_per_pid` → `PsTooManyActiveUploadsError(limit)`; (7) 行 INSERT (`filename = Path(filename).name` の stem を 200 文字で切る、`suffix` / `original_suffix` は B-10〜12)、作業ディレクトリ `mkdir(parents=True)` 後 `os.chmod(dir, 0o700)`、`meta.json` を `os.open(..., O_WRONLY|O_CREAT|O_TRUNC, 0o600)` で書く。
+`register(filename, size, pid, total_chunks, sha256)` の検査順: (1) `pid` が非空 str でなければ `PsArgmentsError("pid")`; (2) `size` が `int` (bool 不可) で `> 0` でなければ `PsArgmentsError("size")`; `size > max_upload_size` → `PsUploadTooLargeError(size, max_upload_size)`; (3) `total_chunks` が `int` で `>= 1` でなければ `PsArgmentsError("total_chunks")`; (4) `ceil(size/total_chunks) > chunk_max_size` → `PsArgmentsError("total_chunks")`; `total_chunks > max(1, ceil(size / min_chunk_size))` → `PsArgmentsError("total_chunks")`; (5) `SHA256_RE` 不一致 → `PsArgmentsError("sha256")`; (6)(7) は **同一トランザクション**: `BEGIN IMMEDIATE` で書きロックを取ってから `count_active(pid)` を数え、`>= max_active_uploads_per_pid` なら ROLLBACK して `PsTooManyActiveUploadsError(limit)`、そうでなければ同じトランザクション内で行 INSERT → COMMIT (別接続の並行 register は `BEGIN IMMEDIATE` で `busy_timeout` 3 秒まで待つので、カウントと INSERT の間に他方が割り込めず上限を超えない); (7) 行 INSERT (`filename = Path(filename).name` の stem を 200 文字で切る、`suffix` / `original_suffix` は B-10〜12)、作業ディレクトリ `mkdir(parents=True)` 後 `os.chmod(dir, 0o700)`、`meta.json` を `os.open(..., O_WRONLY|O_CREAT|O_TRUNC, 0o600)` で書く。
 
 `parts_upload(pid, public_id, count, blob, sha256)` の検査順: (1) `ID_RE` → `PsPublicIDInvalidError`; (2) 行なし → `PsPublicIDInvalidError`; (3) `meta.pid != pid` → `PsPermissionError`; (4) `status ∉ {INIT, UPLOADING, ERROR}` または作業ディレクトリ無し → `PsFileStatusInvalidError`; (5) `count` が `int` (bool 不可) で `0 <= count < total_chunks` でなければ `PsArgmentsError("count")`; (6) `blob` が `bytes | bytearray` でなければ `PsArgmentsError("blob")`; `len(blob) > chunk_max_size` → `PsChunkEntityTooLargeError`; `len(blob) != expected_chunk_size(...)` → `PsChunkSizeMismatchError(expected, actual)`; (7) `sha256(blob)` を **メモリ上で** 計算し不一致 → `status_change(ERROR)` して `PsDataCorruotedError` (チャンクファイルは書かない); (8) `chunk<count>.parts` を 0600 で書く (既存なら上書き = 再送許容); (9) 全チャンクの存在を毎回数え、揃えば `READY`、揃わなければ `UPLOADING`。
 
@@ -404,6 +404,7 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 | E-6 | `register(..., sha256="xyz")` / `"A"*64` 以外の長さ | `PsArgmentsError("sha256")` | — | 受理 |
 | E-7 | 同じ pid で `register` を 8 回 (既定 `max_active_uploads_per_pid`) → 9 回目 | 9 回目が `PsTooManyActiveUploadsError(8)`; `MultiPartUploader(..., max_active_uploads_per_pid=2)` なら 3 回目 | — | 無制限 |
 | E-8 | E-7 の後、1 件を `delete` (または commit) して再度 `register` | 正常 (COMMITTED は active に数えない) | — | — |
+| E-8a | 同じ DB ファイルに別接続の `MultiPartUploader` を 2 本作り、同じ pid で active 7 件にした上で、2 本から **同時に** (スレッド 2 本、`threading.Barrier` で揃えて) `register` | ちょうど 1 本が成功し、もう 1 本が `PsTooManyActiveUploadsError(8)`。終了後 `count_active(pid) == 8` (9 にならない) | — | 2 本とも成功し 9 件 (RG06) |
 | E-9 | `data = b"hello-world-012345"` (18 B), total 2 → chunk0 を `data[:8]`、chunk1 を `data[8:]` で送る | chunk0 で `PsChunkSizeMismatchError(9, 8)`; `chunk0.parts` は書かれない; status INIT のまま | — | 受理 |
 | E-10 | 同データを `data[:9]`, `data[9:]` で送る | 両方正常、1 つ目後 `status == "UPLOADING"`、2 つ目後 `"READY"`。`chunk0.parts` / `chunk1.parts` の mode 0o600 | — | 0644 |
 | E-11 | E-10 を **逆順** (count 1 → count 0) | 2 つ目後に `READY` | — | count==total-1 でだけ判定するため 0 → 1 の順でないと READY にならない |
@@ -464,6 +465,7 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 | DB-2 | `DatabaseManager(path, file_mode=None)` | umask 依存 (chmod しない) | — |
 | DB-3 | `DatabaseManager(path, file_mode=0o640)` | `0o640` | — |
 | DB-4 | `DatabaseManager(":memory:")` | 例外なし | 同じ |
+| DB-4a | `_init` が例外を上げるサブクラス (例: `_init` で `raise RuntimeError`) を `tmp/"a.db"` で生成 | `RuntimeError` が呼び出し側に届き、生成途中のインスタンスの `_conn is None` (close 済)。同じパスを別の `DatabaseManager` で直ちに開けて `PRAGMA journal_mode` が通る (ロック・接続リークなし) | — | 接続が開いたまま残る (RG09) |
 | DB-5 | `dbm.execute("PRAGMA user_version")` | `[(0,)]` (行が返る) | `None` |
 | DB-6 | `dbm.execute("WITH a AS (SELECT 1) SELECT * FROM a")` | `[(1,)]` | `None` |
 | DB-7 | `dbm.execute("CREATE TABLE t(x)")` / `execute("INSERT INTO t VALUES (1)")` | `None` | 同じ |
@@ -514,7 +516,8 @@ Reviewer はこの節から直接テストを生成する。各項目は「入�
 
 ### 8-2. クライアント JS (`public/assets/app/appera/forNexom/uploader.js`)
 
-- 3 MiB 等分・最後が端数、`count` 0 始まり、`total_chunks = ceil(size/chunkSize)` → **1.2.0 の規則にそのまま適合** (E-10)。変更不要。
+- **要修正 (非互換)**: 現在の JS は 3 MiB 固定でスライスし `total_chunks = ceil(size / 3 MiB)` を送る。1.2.0 の規則は「`ceil(size / total_chunks)` で等分、最後が端数」なので、`size` が 3 MiB の倍数でない限りチャンク長が合わない (例: 4 MiB → `total_chunks = 2`、サーバー期待は 2 MiB + 2 MiB、JS は 3 MiB + 1 MiB を送り chunk0 で `PsChunkSizeMismatchError(2097152, 3145728)`)。
+- 修正手順 (`uploader.js` の `upload()`): `total_chunks = calc_total_chunks(size, chunkSize)` の直後に `const sliceSize = Math.ceil(size / total_chunks);` を足し、ループの `start = i * chunkSize` / `end = Math.min(size, start + chunkSize)` を `sliceSize` に置き換える (`count` 0 始まりと最後の端数は既にこの規則と一致)。`sliceSize <= 3 MiB <= chunk_max_size` なので E-3 の上限にも掛からない。
 - 100 MiB を超えるファイルは `PsUploadTooLargeError` (413 想定) になる。必要なら `MultiPartUploader(..., max_upload_size=...)` で引き上げる。
 
 ### 8-3. 設計上の注意 (capability モデル)

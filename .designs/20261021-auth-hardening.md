@@ -37,7 +37,7 @@
 | AUTH-02 | `Cookie(..., MaxAge=sess.expires_at)` → 属性名無効・絶対 epoch [実測: `MaxAge=1761000000`] | `max_age=expires_at - now` (相対秒) で発行、削除は Max-Age=0 ヘルパ | §5 K |
 | AUTH-03 | `_nxt` に SameSite なし | `same_site="Lax"` (Cookie 契約の既定)。state-changing POST は同一オリジン検査 `is_same_origin()` を補助に | §5 K, §5 X |
 | AUTH-04 | レート制限・ロックアウト皆無。[実測] 誤 pw 1 回 ≈ 0.04-0.05 s CPU、sync worker 4 → 毎秒 100 弱で飽和、verify が timeout → 全ページ 500 | 2 軸 (IP / アカウント) の固定窓カウンタ + ロック (SQLite `auth_attempts`、**ハッシュ前に試行枠を予約**して閾値を厳密上限に)、**プロセス内の時間ベース PBKDF2 ゲージ** (直近 1 秒窓の実測 hash 時間が 50% を超えたら 429) で login が verify を道連れにしない。安い検査を PBKDF2 の前に置く。再認証経路 (`update/password`, master 操作) も同じロック・ゲージ・長さ上限を通る | §5 L, S, H, M |
-| AUTH-05 | `password="1"` で 201、`user_id="<img src=x onerror=alert(1)>"` で 201 [実測] | `AuthPolicy` で user_id 正規表現 / public_name 長さ・禁止文字 / password 最小 8 文字・最大 256 byte。新規作成・更新時のみ適用 (既存行は免除) | §4.1, §5 S |
+| AUTH-05 | `password="1"` で 201、`user_id="<img src=x onerror=alert(1)>"` で 201 [実測] | `AuthPolicy` で user_id 正規表現 / public_name 長さ・禁止文字 / password 最小 8 文字・最大 256 byte。**新規登録と変更時のみ**適用 (既存行は免除)。login / 再認証は DoS 上限 (1024 文字 / 1024 byte) だけ | §4.1, §5 S, L-5 |
 | AUTH-06 | 無認証 `resolve/pid` が存在確認 + pid を返す。login は未知 0.0001 s / 既知誤 pw 0.05 s [実測 500 倍]。無効化済は pw 不問で A04 | `resolve/pid` **削除** (404)。未知ユーザーでもダミー PBKDF2。`is_active` 判定はパスワード一致の**後** | §5 L-6〜L-8, T-1 |
 | AUTH-07 / DATA-10 / HTTP-07 | AuthService に呼び出し元検査なし。`create-auth` 既定 0.0.0.0 | `AuthService(allowed_clients=("127.0.0.1","::1"))` の REMOTE_ADDR ガード (403 A13)。CLI 既定は http doc。雛形 config に `ALLOWED_CLIENTS` / `TRUSTED_PROXY_COUNT` (auth は既定 0) | §5 G, §6 |
 | AUTH-08 | 任意ユーザーが任意 group_id を先取り、`group/auth` が非メンバーにも level を返す | `group/auth` は「自分の pid」または「自分がその group の level ≥ 1 のメンバー」のときだけ応答、他は A13。group_id / name に形式検証。**先取り自体は許容** (§11 不採用案 N-6) | §5 P |
@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_auth_attempts_window ON auth_attempts(window_star
 | v2 | `pbkdf2_sha256$600000$2dc5c53cad983c25eea99ece8663a88d$c205e6…820bdc` (118 文字) | `password_hash` に `$` を含む。`split("$")` で 4 要素、`[0]=="pbkdf2_sha256"`、`[1]` は int |
 | legacy (1.1.x) | `password_hash` = 64 文字 hex、`password_salt` = 32 文字 hex | `$` を含まない。反復 200,000 固定 |
 
-`needs_rehash = legacy or iterations != policy.pbkdf2_iterations`。
+`needs_rehash = legacy or iterations != policy.pbkdf2_iterations`。再ハッシュの書き込みは `UPDATE users SET password_hash=?, password_salt='' WHERE uid=? AND password_hash=? AND password_salt=?` (後 2 つは照合に使った旧値)。照合と UPDATE の間に別接続の `update_password` が完了していれば 0 行更新で終わり、新しいパスワードを上書きしない (L-18b)。
 
 ### 3.3 マイグレーション (既存 SQLite を 1.2.0 で開いたとき)
 
@@ -137,6 +137,9 @@ class AuthPolicy:
     public_name_max_len: int = 64                        # NFC 正規化 + strip 後のコードポイント数。最小は 1
     password_min_len: int = 8                            # コードポイント数
     password_max_bytes: int = 256                        # UTF-8 バイト数
+    # login / reauth の DoS 上限 (形式は見ない。既存行をログイン不能にしないため signup ポリシーより緩い)
+    login_user_id_max_len: int = 1024                    # コードポイント数
+    login_password_max_bytes: int = 1024                 # UTF-8 バイト数
     group_id_pattern: str = r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}"
     # アカウント軸ロック (login_user:<user_id>)
     account_lock_threshold: int = 5
@@ -179,6 +182,9 @@ class AuthService:
         clock: Callable[[], int] = _now,                                   # テストで時刻を差し替える
     ) -> None: ...
     # 削除: master_password (渡すと TypeError。1.1.x 呼び出しは起動時に落ちる = 明示的)
+    # __init__ の順序: AuthDBM(db_path) を開く → ensure_master_user (M-1〜M-3) → Router 構築 → _hash_log クリア。
+    # ensure_master_user / マイグレーションが例外を投げたら self.dbm.rip_connection() で SQLite 接続を閉じてから同じ例外を再送出する
+    # (起動失敗時に接続を抱えたまま落ちない。gunicorn の再試行ごとに WAL ハンドルが積まれるのを防ぐ)
 
     def handler(self, environ: dict) -> JsonResponse: ...
 ```
@@ -205,14 +211,18 @@ class AuthService:
 | `master/users/deactivate` | `{token, target_user_id, login_password, client_ip}` | `master_password` → `login_password` (master 自身の login password)。`client_ip` 必須。再認証は login と同じロック・ゲージ (§5 M) |
 | `master/users/activate` | `{token, target_user_id, login_password, client_ip}` | **新規** |
 
-handler の共通応答:
+handler の処理順序 (固定) と共通応答:
 
-- 成功: 各エンドポイントの JSON (status 200、signup は 201)
-- `NexomError` (Auth 系): `{"ok": false, "error": "<code>"}` + エラーが `field` 属性を持つ (A01 / A12) なら `"field": "<name>"`。status は `_status_for_auth_error`
-- `PathNotFoundError`: 404 `{"ok": false, "error": "NotFound"}`
-- body が JSON でない / 不正 JSON / JSON object 以外 / 10 MB 超 (`ValueError`): 400 `{"ok": false, "error": "A01", "field": "body"}`
-- その他 `Exception`: 500 `{"ok": false, "error": "InternalError"}`、traceback を `AuthLogger.event("INTERNAL_ERROR", subject=<path>, detail=<type(e).__name__>)` と `AppLogger` (雛形側) に
-- REMOTE_ADDR ガード不通過: 403 `{"ok": false, "error": "A13"}` (ルーティングより前)
+1. **`allowed_clients` ガード** — `environ["REMOTE_ADDR"]` だけで判定する (`Request` はまだ作らない。XFF は見ない)。不通過 → 403 `{"ok": false, "error": "A13"}`
+2. **`Request(environ)` 構築** — try 内。`ValueError` (不正な `CONTENT_LENGTH`、10 MB 超) → 400 `{"ok": false, "error": "A01", "field": "body"}`。その他の例外 (不正 Cookie ヘッダ等) → 下記 500 経路
+3. **ルーティング + handler** — 以下の共通応答:
+   - 成功: 各エンドポイントの JSON (status 200、signup は 201)
+   - `NexomError` (Auth 系): `{"ok": false, "error": "<code>"}` + エラーが `field` 属性を持つ (A01 / A12) なら `"field": "<name>"`。status は `_status_for_auth_error`
+   - `PathNotFoundError`: 404 `{"ok": false, "error": "NotFound"}`
+   - body が JSON でない / 不正 JSON / JSON object 以外: 400 `{"ok": false, "error": "A01", "field": "body"}`
+   - その他 `Exception` (2. の非 ValueError を含む): 500 `{"ok": false, "error": "InternalError"}`、traceback を `AuthLogger.event("INTERNAL_ERROR", subject=<PATH_INFO>, detail=<type(e).__name__>)` と `AppLogger` (雛形側) に
+
+全経路で `JsonResponse` を返す (handler から例外は漏れない)。雛形 wsgi (§6.2) の `except Exception` は handler 自体のバグに対する最終防衛。
 
 ### 4.3 `AuthDBM(DatabaseManager)`
 
@@ -239,6 +249,7 @@ class AuthDBM(DatabaseManager):
     def _migrate(self) -> None
     def _hash_password(self, password: str) -> str                # v2 形式を返す (salt は毎回 secrets.token_hex(16))
     def _verify_password(self, password: str, password_hash: str, password_salt: str) -> tuple[bool, bool]   # (ok, needs_rehash)
+    def _rehash_if_unchanged(self, *, uid: str, password: str, old_hash: str, old_salt: str) -> None   # 新 v2 hash を生成し、WHERE uid=? AND password_hash=old_hash AND password_salt=old_salt で UPDATE。0 行なら何もしない (L-18b)
     def _dummy_verify(self, password: str) -> None                # 未知ユーザー用。モジュール定数 _DUMMY_SALT (import 時 secrets.token_bytes(16)) で policy.pbkdf2_iterations 回
     def _gauge_check(self) -> None                                # 直近窓の hash 時間合計 > ratio × window なら AuthTooManyAttemptsError (DB 無変更)
     def _timed_hash(self, fn: Callable[[], T]) -> T               # perf_counter で測って deque に (end, duration) を積む。全 PBKDF2 呼び出しはこれを通す
@@ -348,7 +359,8 @@ class UserDatabaseManager(DatabaseManager):
 | L-2 | 同上 + `"user_agent":"Mozilla/5.0"` | `user_agent` が body の値で保存・応答。body に無く HTTP `User-Agent` ヘッダがあるときはヘッダ値 (現状と同じ) |
 | L-3 | `client_ip` 欠落 | 400 `{"ok": false, "error": "A01", "field": "client_ip"}`。ハッシュ計算なし、DB 無変更。**現状**: client_ip という概念なし |
 | L-4 | `client_ip="999.1.1.1"` | 400 A12 field=client_ip |
-| L-5 | `user_id` 257 文字 / `password` 257 byte 超 | 400 A12 field=user_id / password。ハッシュ計算なし (安い拒否を先に)。失敗カウンタも加算しない |
+| L-5 | `user_id` 1025 文字 / `password` 1025 byte | 400 A12 field=user_id / password。ハッシュ計算なし (安い拒否を先に)。失敗カウンタも加算しない。1024 文字 / 1024 byte はこの検査を通り DB 照合へ (未知なら L-6 と同じ A03) |
+| L-5b | legacy 行 `big_user` (user_id 300 文字、password 300 byte、1.1.x 形式) で正しい pw | **200** (login は signup ポリシーの正規表現・最小長・256 byte を見ない)。再ハッシュも行われる (L-18)。`Big_User` (大文字) や `a b` (空白) の legacy ID も同様にログイン可 |
 | L-6 | `user_id="nobody"` (存在しない)、password 任意 | 401 `{"ok": false, "error": "A03"}`。**ダミー PBKDF2 を 1 回計算** (ゲージに計上)。`login_user:nobody` と `login_ip:203.0.113.7` はハッシュ前に予約 (+1) され、失敗で確定 (そのまま残る)。ログ `LOGIN_NG subject=nobody ip=203.0.113.7 detail=reason=invalid`。**現状**: 0.0001 s で即 A03 (既知ユーザー誤 pw の 1/500) |
 | L-7 | `user_id="alice"`, password 誤り | 401 A03。両カウンタ +1 (予約が確定)。L-6 と応答・所要時間が同等 (Reviewer: 20 回ずつ計測し中央値の比が 0.5〜2.0 の範囲であることを確認。絶対値は環境依存) |
 | L-7b | `login_user:alice.count=4` の状態で、**同時に** 2 本の誤 pw login (テストでは 2 本目を 1 本目のハッシュ前に割り込ませる = `_timed_hash` を差し替えて同期) | 一方は予約 count=5 でハッシュ → 401 A03 + ロック設定、他方は予約 count=6 > 5 → `_release` して **429 A11、ハッシュしない**。窓内にハッシュまで到達する試行は閾値 5 回を厳密に超えない |
@@ -363,14 +375,15 @@ class UserDatabaseManager(DatabaseManager):
 | L-16 | 同一 IP から成功 100 回連続 | 全て 200 (成功は IP 軸に数えない)。`login_ip:` は予約 (+1) → 成功で `_release` (−1) → count 0 の行は削除されるので、終了時に行は残らない |
 | L-17 | `policy=AuthPolicy(hash_busy_ratio=0.0)` の AuthService で、存在しない user 宛の失敗を 3 連続 (1 秒以内) | 1 回目 401 A03 (ハッシュ実行)、**2・3 回目 429 A11** (直近窓の hash 時間 > 0 なのでハッシュしない)。`auth_attempts` は 1 回目の予約分 (count=1) だけで 2・3 回目は行を触らない。ログ `RATE_LIMITED subject=gauge detail=reason=busy`。verify は同時に 200 で応答する (ゲージは PBKDF2 だけに掛かる)。`hash_window_sec` 経過後の 4 回目は 401 A03。前提: 起動時の master 作成ハッシュ (M-3) はゲージに計上しない — `AuthService.__init__` の末尾で計測ログ (`_hash_log`) をクリアする。これが無いと直後の 1 回目が 429 になる |
 | L-17b | 既定 `hash_busy_ratio=0.5` で、ハッシュ 1 回が d ms の機械 (本機 d≈124) | 判定は「ハッシュ前に、直近窓の合計 > 500 ms なら拒否」なので、k 回目が通る条件は `(k-1)·d ≤ 500`。d=124 なら 1〜5 回目が通り (4 回で 496 ms)、6 回目 (合計 620 ms) で 429。Reviewer は自機の d を測って `floor(500/d)+1` 回目までが通り、その次が 429 になることを確認する |
-| L-18 | `legacy_bob` 正しい pw | 200。`users.password_hash` が `pbkdf2_sha256$600000$…` に、`password_salt=''` に更新 (透過再ハッシュ)。2 回目の login も 200 で hash 不変 |
+| L-18 | `legacy_bob` 正しい pw | 200。`users.password_hash` が `pbkdf2_sha256$600000$…` に、`password_salt=''` に更新 (透過再ハッシュ)。UPDATE は `WHERE uid=? AND password_hash=<照合に使った旧値> AND password_salt=<照合に使った旧値>` の条件付き。2 回目の login も 200 で hash 不変 |
+| L-18b | `legacy_bob` の login が照合を終えた直後 (UPDATE 前) に、別接続の `update/password` が新パスワード `brand-new-99` で完了する (テストでは `_timed_hash` 差し替えで割り込ませる) | login は 200 を返すが**再ハッシュの UPDATE は 0 行** (旧値条件に合わない) で `password_hash` は `update/password` の値のまま。その後 `legacy-pass-9` は 401 A03、`brand-new-99` は 200。**旧設計 (uid だけの UPDATE)**: 旧パスワードが復活していた (リリース前ゲート RG01) |
 | L-19 | `legacy_bob` 誤 pw | 401 A03、hash 不変 (legacy のまま) |
 | L-20 | `alice` 21 回連続 login 成功 | sessions の alice 行は 20 (created_at 最古の 1 行が削除)。全 21 トークンのうち最初の 1 本は verify で `active: false` |
 | L-21 | 事前に alice の期限切れセッション 3 行 + revoked 2 行がある状態で login | それら 5 行は DELETE される (他ユーザーの行は不変) |
 | L-22 | body が `application/json` でない (form) | 400 A01 field=body |
 | L-23 | 不正 JSON | 400 A01 field=body (**現状**: 500) |
 
-**login の処理順序 (固定)**: ① method ② JSON ③ 必須フィールド・長さ上限・`client_ip` 形式 (A01/A12、DB 無変更) ④ `_check_locked(login_ip)`、`_check_locked(login_user)` (A11、DB 無変更) ⑤ `_gauge_check()` (A11、DB 無変更) ⑥ **予約** `n_user=_reserve(login_user)`, `n_ip=_reserve(login_ip)`; `n_user > 5` または `n_ip > 30` なら両方 `_release` → A11 (ハッシュしない) ⑦ PBKDF2 (実 or ダミー、`_timed_hash`) ⑧ 不一致 / 無効化 → `n_user >= 5` なら `_lock(login_user, 900)`、`n_ip >= 30` なら `_lock(login_ip, 900)`、A03/A04 ⑨ 一致 → `_reset(login_user)` (行削除)、`_release(login_ip)` (成功は IP 軸に数えない)、セッション掃除・発行 ⑩ `_sweep_attempts`。
+**login の処理順序 (固定)**: ① method ② JSON ③ 必須フィールド (A01)・DoS 上限 `user_id` ≤ `login_user_id_max_len` (1024 文字) / `password` ≤ `login_password_max_bytes` (1024 byte) (A12)・`client_ip` 形式 (A12)。**signup ポリシー (正規表現・最小 8 文字・256 byte) は見ない** (DB 無変更) ④ `_check_locked(login_ip)`、`_check_locked(login_user)` (A11、DB 無変更) ⑤ `_gauge_check()` (A11、DB 無変更) ⑥ **予約** `n_user=_reserve(login_user)`, `n_ip=_reserve(login_ip)`; `n_user > 5` または `n_ip > 30` なら両方 `_release` → A11 (ハッシュしない) ⑦ PBKDF2 (実 or ダミー、`_timed_hash`) ⑧ 不一致 / 無効化 → `n_user >= 5` なら `_lock(login_user, 900)`、`n_ip >= 30` なら `_lock(login_ip, 900)`、A03/A04 ⑨ 一致 → `_reset(login_user)` (行削除)、`_release(login_ip)` (成功は IP 軸に数えない)、`needs_rehash` なら `_rehash_if_unchanged` (旧値条件 UPDATE、0 行なら何もしない)、セッション掃除・発行 ⑩ `_sweep_attempts`。
 
 予約の規則 (`_reserve`): 行なし → `count=1, window_start=now`。行あり: `now >= window_start + window_sec` → `count=1, window_start=now`; それ以外 → `count += 1`。1 文の `INSERT … ON CONFLICT(key) DO UPDATE SET count = CASE … END, window_start = CASE … END` の後に `SELECT count` (db.py の `execute` は SELECT 以外を fetch しないため RETURNING は使わない)。`_release` は `UPDATE … SET count = count - 1` + `DELETE … WHERE key=? AND count <= 0 AND locked_until IS NULL`。予約とハッシュの間でプロセスが落ちた場合はその予約が失敗として残る (fail-closed)。`_sweep_attempts` は login/signup/reauth の最後に `DELETE FROM auth_attempts WHERE window_start + 3600 <= now AND (locked_until IS NULL OR locked_until <= now)`。
 
@@ -433,7 +446,7 @@ class UserDatabaseManager(DatabaseManager):
 | H-1 | `{token, current_password: 正しい, new_password: "new-pass-123", client_ip: "203.0.113.7"}` | 200。hash v2 で更新、全セッション revoked (変更なし)。ログ `PASSWORD_CHANGE subject=<user_id>`。ハッシュ 2 回 (照合 + 生成、両方ゲージ計上)。`login_user:<user_id>` は予約 → 一致で `_reset`、`login_ip` は予約 → `_release` |
 | H-1b | `client_ip` 欠落 | 400 A01 field=client_ip (token 検証の前。**現状**: client_ip という概念なし) |
 | H-2 | `new_password="short"` | 400 A12 field=new_password。current の照合より**前**に判定 (ハッシュ計算なし、`auth_attempts` 無変更) |
-| H-2b | `current_password` が 257 byte | 400 A12 field=current_password (ハッシュ計算なし) |
+| H-2b | `current_password` が 1025 byte | 400 A12 field=current_password (ハッシュ計算なし)。1024 byte 以下は形式を見ずに照合へ (login と同じ DoS 上限のみ。`new_password` だけが signup ポリシーの対象) |
 | H-3 | current 誤り | 401 A03。`login_user:<user_id>` と `login_ip:<client_ip>` が予約 → 失敗で確定 (+1、login と同じカウンタ・同じ閾値。5 回で L-10 と同じロック)。ログ `LOGIN_NG subject=<user_id> ip=<client_ip> detail=reason=reauth` |
 | H-3b | `login_user:<user_id>` が L-10 でロック中 (login 由来) に `update/password` | **429 A11、current を照合しない** (ハッシュ 0 回、`auth_attempts` 無変更)。逆に H-3 を 5 回繰り返して付いたロックは login (L-11) も 429 にする (同一キー) |
 | H-3c | `login_ip:<client_ip>` が L-15 でロック中 | 429 A11、照合しない |
@@ -471,7 +484,7 @@ class UserDatabaseManager(DatabaseManager):
 | M-6 | `master/users/deactivate` `{token: master, target_user_id: "carol", login_password: <master の login pw>, client_ip: "203.0.113.7"}` | 200。carol `is_active=0`、carol の sessions 全 revoked。ログ `MASTER_DEACTIVATE subject=carol detail=by=master_user`。ハッシュ 1 回 (ゲージ計上)。`login_user:master_user` 予約 → `_reset`、`login_ip` 予約 → `_release` |
 | M-7 | 同、`login_password` 誤り | 401 A03。`login_user:master_user` と `login_ip:<client_ip>` が予約 → 確定 (+1、5 回でロック → 以降 master の login も 429)。ログ `LOGIN_NG subject=master_user ip=<client_ip> detail=reason=reauth` |
 | M-7b | `login_user:master_user` ロック中 (login 由来でも M-7 由来でも) | **429 A11、照合しない** (ハッシュ 0 回)。`login_ip` ロック中・ゲージ超過も同じ |
-| M-7c | `login_password` 257 byte | 400 A12 field=login_password (照合しない) |
+| M-7c | `login_password` 1025 byte | 400 A12 field=login_password (照合しない)。1024 byte 以下は形式を見ずに照合へ (login と同じ DoS 上限のみ) |
 | M-8 | 同、`master_password` キーで送る (1.1.x クライアント、`client_ip` も無い) | 400 A01 field=login_password (フィールド検査順: target_user_id → login_password → client_ip) |
 | M-9 | `target_user_id = master_user` (自分) | 403 A13、DB 無変更。**現状**: 200 で自己無効化 → 回復不能 |
 | M-10 | `target_user_id` 不明 | 400 A12 field=target_user_id。**現状**: A03 |
@@ -538,7 +551,7 @@ nginx 雛形・aisaba の vhost は `proxy_set_header Host $host` を送って�
 
 | # | 条件 | 期待 |
 |---|---|---|
-| W-1 | `Cookie: a<b=1` (不正キー) を送る | 500 `{"ok": false, "error": "InternalError"}` が **`start_response` 経由で**返る (gunicorn の素の 500 でない)。error.log に traceback。**現状**: `NameError` |
+| W-1 | `CONTENT_LENGTH=abc` (不正 Content-Length)、`REMOTE_ADDR=127.0.0.1` | 400 `{"ok": false, "error": "A01", "field": "body"}` が **`start_response` 経由で**返る (`Request` 構築の `ValueError` を handler が捕捉。**現状**: 500)。同じ要求を `REMOTE_ADDR=10.0.0.5` から送ると **403 A13 が先** (ガードは Request 構築より前)。handler 自体が例外を漏らした場合だけ雛形 wsgi が 500 `InternalError` を返し error.log に traceback (**現状**: `NameError` で gunicorn の素の 500) |
 | W-2 | 正常リクエスト | access.log に `<ip> "POST /login" 200 <ms>ms "<ua>"` (形式変更なし) |
 | W-3 | `REMOTE_ADDR=127.0.0.1`、`X-Forwarded-For: 1.2.3.4`、`TRUSTED_PROXY_COUNT=0` (auth 既定) | access.log の ip は `127.0.0.1` (XFF 無視)。`TRUSTED_PROXY_COUNT >= 1` のときの採用規則は http doc §9 / §17.5 X10〜X12 に従う (本 doc では再定義しない)。**現状**: 常に XFF 先頭 |
 
@@ -577,7 +590,7 @@ def app(environ, start_response):
     t0 = time.time()
     res: Response
     try:
-        res = service.handler(environ)          # handler 内で NexomError は JSON 化済み
+        res = service.handler(environ)          # handler 内で ガード(403) → Request 構築(ValueError→400) → routing の順 (§4.2)。NexomError は JSON 化済み
     except Exception as e:
         logger.error(e)
         res = JsonResponse({"ok": False, "error": "InternalError"}, status=500)
@@ -689,7 +702,7 @@ def app(environ, start_response):
 4. `config.py` に `MASTER_PASSWORD` があれば削除 (残っていても未参照で害はない)。`ALLOWED_CLIENTS` / `TRUSTED_PROXY_COUNT` は任意 (未定義なら wsgi.py 側で import しない形にする。`TRUSTED_PROXY_COUNT` 未定義時は `client_ip(environ)` の既定 0)
 5. `systemctl restart nexom@auth` → 初回起動で schema v2 へ自動移行 (§3.3)、master 行に `is_master=1, is_active=1`
 6. 確認: `curl -s -X POST http://127.0.0.1:7070/verify -H 'content-type: application/json' -d '{"token":"x"}'` → `{"active": false}`。別ホストから同じ要求 → 接続不可 (bind) または 403 A13
-7. 既存ユーザー: そのままログイン可、初回成功時に 600k へ再ハッシュ。`user_id` の新規約は既存行に適用しない (大文字 ID 等はそのまま)
+7. 既存ユーザー: そのままログイン可、初回成功時に 600k へ再ハッシュ。signup ポリシー (正規表現・最小 8 文字・256 byte) は新規登録と変更時だけで、login / 再認証は DoS 上限 (`user_id` 1024 文字、`password` 1024 byte) しか見ない (L-5b)。**例外**: 1024 を超える ID / パスワードの既存行は 1.2.0 でログイン時に A12 になる (事前に `sqlite3 auth.db "SELECT user_id FROM users WHERE length(user_id) > 1024"` で 0 件を確認。該当すれば master が `deactivate` → 本人が再登録)
 8. 無効化操作をスクリプト等で行っていた場合: `master_password=<定数>` → `login_password=<master の login password>` に書き換え
 
 ### 10.3 aisaba のアプリ側 (`aisaba_main` 等、AuthPages / AuthClient 利用)
@@ -719,6 +732,7 @@ def app(environ, start_response):
 | N-7b | PBKDF2 予算を回数ベースの token bucket (4 hash/s、容量 8) にする | 「4 回」は本機の 123.7 ms × 4 ≈ 50% から割った値で、遅い機械では 50% を超え、速い機械では絞り過ぎる。実測 wall time の比率 (`hash_busy_ratio`) なら機械が変わっても verify に残す割合が不変 |
 | N-8 | AuthClient 側の verify 結果キャッシュ (30 s) | revoke / パスワード変更の即時性が落ちる。ゲージで verify の応答性を守る方を採る |
 | N-15 | 失敗カウンタを「ハッシュ後に加算」する (予約なし) | ロック確認 → ハッシュ → 加算 の間に別 worker の試行が割り込むと、閾値 5 回を超えて 6 回・7 回目のハッシュまで走る。ハッシュ前に予約し成功で戻す方式なら閾値が厳密上限になる (L-7b / S-13b) |
+| N-16 | login の透過再ハッシュを `WHERE uid=?` だけで UPDATE する | 照合後・UPDATE 前に別接続の `update_password` が完了すると旧パスワードが復活する (リリース前ゲート RG01)。照合に使った旧 `password_hash` / `password_salt` を WHERE に含める旧値条件 UPDATE (0 行なら何もしない) で閉じる (L-18 / L-18b)。トランザクションで囲む案は `DatabaseManager` が文単位 auto-commit で、PBKDF2 (≈125 ms) の間 DB を握ることになるので採らない |
 | N-9 | `verify` 失敗を `TOKEN_INVALID` でログ | 期限切れ cookie を持つ閲覧者のページビューごとに 1 行書く = ログ DoS 面。意図的な認証付き API 呼び出し (T-2) だけ記録 |
 | N-10 | `user_id` を NFKC + 小文字化して保存 | 既存 ID と衝突規則が変わる。新規は正規表現で小文字のみに制限し、衝突検査は `COLLATE NOCASE` で済ませる (保存値は入力そのまま) |
 | N-11 | `public_name` から `<` `>` を許し表示側エスケープに全面依存 | エスケープは http doc で既定化するが、`Markup` の誤用 1 箇所で stored XSS が全アプリに伝播する供給源を auth 層で絶てる。正規名で `<>` を使う例は無視できる |
@@ -740,4 +754,5 @@ def app(environ, start_response):
 - アカウントロックによる嫌がらせ (15 分): 受容 (N-5)。回復は時間経過のみ (master による unlock は未実装)
 - legacy ユーザーの初回ログインまで 200k ハッシュ (タイミングで「legacy かつ存在」が推定可能): 全員が 1 回ログインすれば消える
 - `auth_attempts` の行増加: 行が増えるのは予約 (⑥/⑦) に到達した要求だけで、その前段のロック確認・形式検証・ゲージで拒否された要求は行を作らない。予約に到達する要求はゲージで worker あたり ≤ 500 ms/s のハッシュ = 本機 (124 ms) で ≤ 4 回/s + 超過 1 回 ≈ 5 行/s/worker、既定 4 worker で ≤ 20 行/s (新規 user_id を毎回変える攻撃者が `login_user:` 行を作る最悪形。`login_ip:` は IP 数ぶんだけ)。`_sweep_attempts` が窓開始から 1 時間で消すので最悪 ≈ 20 × 3600 = 72k 行 (1 行 ≈ 100 byte → 約 7 MB)。許容
-- app ↔ auth の平文 HTTP: loopback 限定が前提。別ホスト運用は private network が条件 (10.4)
+- login の再ハッシュ競合 (L-18b): 旧値条件 UPDATE で旧パスワードの復活は閉じたが、**UPDATE が 0 行でも login は成功しセッションを発行する**。割り込んだ `update_password` が「全セッション revoke」を login の INSERT より前に実行した順序では、この 1 セッションだけ失効を免れて TTL (既定 7 日) まで生きる。旧パスワードを知る者が、パスワード変更と同一瞬間にログインしていた場合に限る窓なので受容。閉じるなら「update_password 後の revoke を `created_at <= 変更時刻` 条件にせず全行」+ login 側で発行後に `password_hash` を再読して不一致なら自セッションを即 revoke、を 1.2.x で検討
+- app ↔ auth の平文 HTTP: loopback 限定が前提。別ホスト運用は private network **かつ** TLS 終端 reverse proxy が条件 (§10.4)
