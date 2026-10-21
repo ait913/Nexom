@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 
-from typing import Any, Iterable
+from contextlib import contextmanager
+from typing import Any, Iterable, Iterator
 from sqlite3 import (
     connect, 
     Connection, 
@@ -53,7 +54,12 @@ class DatabaseManager:
         self._cursor: Cursor | None = None
 
         self.start_connection(auto_commit=auto_commit)
-        self._init()
+        try:
+            self._init()
+        except BaseException:
+            if self._conn is not None:
+                self.rip_connection()
+            raise
 
     def _init(self) -> None:
         """Initialize tables (override in subclasses)."""
@@ -86,7 +92,34 @@ class DatabaseManager:
 
             self.commit()
         except Error as e:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                finally:
+                    self._conn = None
+                    self._cursor = None
             _call_error_handler(e)
+
+    @contextmanager
+    def immediate_transaction(self) -> Iterator[None]:
+        """Run a block inside BEGIN IMMEDIATE ... COMMIT (rolled back on error)."""
+        if self._conn is None or self._cursor is None:
+            raise DBMConnectionInvalidError()
+        previous = self.auto_commit
+        self.auto_commit = False
+        try:
+            try:
+                self._cursor.execute("BEGIN IMMEDIATE")
+            except Error as e:
+                _call_error_handler(e)
+            try:
+                yield
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        finally:
+            self.auto_commit = previous
 
     def rip_connection(self) -> None:
         """Close the current connection."""

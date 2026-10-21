@@ -288,11 +288,11 @@ def test_L4_client_ip_invalid(env):
 
 def test_L5_length_caps_cheap_reject(env):
     env.signup("alice")
-    st, d, _ = env.login("a" * 257)
+    st, d, _ = env.login("a" * 1025)
     assert st == 400 and err(d) == "A12" and d["field"] == "user_id"
-    st, d, _ = env.login("alice", "p" * 257)
+    st, d, _ = env.login("alice", "p" * 1025)
     assert st == 400 and err(d) == "A12" and d["field"] == "password"
-    st, d, _ = env.login("alice", "あ" * 86)  # 258 bytes
+    st, d, _ = env.login("alice", "あ" * 342)  # 1026 bytes
     assert st == 400 and err(d) == "A12" and d["field"] == "password"
     assert env.attempts_nonsignup() == []
 
@@ -897,7 +897,7 @@ def test_H2_short_new_password(env):
 
 def test_H2b_current_password_too_long(env):
     d = env.user("alice")
-    st, r, _ = env.call("/update/password", {"token": d["token"], "current_password": "p" * 257,
+    st, r, _ = env.call("/update/password", {"token": d["token"], "current_password": "p" * 1025,
                                               "new_password": "new-pass-123", "client_ip": IP})
     assert st == 400 and err(r) == "A12" and r["field"] == "current_password"
     assert env.attempts_nonsignup() == []
@@ -1230,7 +1230,7 @@ def test_M7b_gauge_blocks(tmp_path):
 def test_M7c_login_password_too_long(env):
     env.user("carol")
     t = env.master_token()
-    st, r, _ = _deact(env, t, "carol", pw="p" * 257)
+    st, r, _ = _deact(env, t, "carol", pw="p" * 1025)
     assert st == 400 and err(r) == "A12" and r["field"] == "login_password"
     assert env.attempts_nonsignup() == []
 
@@ -1706,7 +1706,7 @@ def test_K6_logout_backend_down_still_clears_cookie(tmp_path):
 def test_K7_login_errors_passthrough(live):
     _real_signup(live)
     pages = _pages(live)
-    res, d = _page_post(pages, "/user/login/", {"user_id": "alice", "password": "p" * 257})
+    res, d = _page_post(pages, "/user/login/", {"user_id": "alice", "password": "p" * 1025})
     assert res.status_code == 400 and d == {"ok": False, "error": "A12", "field": "password"}
     assert _hdrs(res, "Set-Cookie") == []
     for _ in range(DEFAULT.account_lock_threshold):

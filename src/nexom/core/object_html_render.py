@@ -55,16 +55,25 @@ def escape(value: object) -> Markup:
     return Markup(html_lib.escape(str(value), quote=True))
 
 
+class AttrSafe(Markup):
+    """Fully escaped attribute value (quotes encoded); not escaped again in attributes."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return f"AttrSafe({str(self)!r})"
+
+
 def safe_url(
     value: object, *, allowed_schemes: tuple[str, ...] = ("http", "https", "mailto")
-) -> Markup:
+) -> AttrSafe:
     """Decode, validate and escape a URL, including trusted Markup inputs."""
     raw = html_lib.unescape(str(value))
     probe = re.sub(r"[\x00-\x20]", "", raw).lower()
     match = re.match(r"^([a-z][a-z0-9+.\-]*):", probe)
     if match and match.group(1) not in allowed_schemes:
-        return Markup("")
-    return Markup(html_lib.escape(raw, quote=True))
+        return AttrSafe("")
+    return AttrSafe(html_lib.escape(raw, quote=True))
 
 
 def json_script(value: object, element_id: str | None = None) -> Markup:
@@ -91,6 +100,32 @@ _INSERT_RE: Final = re.compile(r"<Insert\s+([\w\.]+)>(.*?)</Insert>", flags=re.D
 # Example:
 #     <Import components.header />
 _IMPORT_LINE_RE: Final = re.compile(r"(?m)^([ \t]*)<Import\s+([\w\.]+)\s*/>\s*$")
+
+
+# Load-time check: event handler / srcdoc / style attribute values must not hold slots.
+_UNSAFE_ATTR_SLOT_RE: Final = re.compile(
+    r"""(?:\s|<\w+)(on\w+|srcdoc|style)\s*=\s*(?:"[^"]*|'[^']*)\{\{""",
+    flags=re.IGNORECASE,
+)
+
+
+def _in_attr_value(html: str, pos: int) -> bool:
+    """True if pos lies inside an open quoted attribute value of an HTML tag."""
+    start = html.rfind("<", 0, pos)
+    if start == -1:
+        return False
+    if html.startswith("<!--", start):
+        return False
+    quote = ""
+    for ch in html[start + 1:pos]:
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == ">":
+            return False
+    return bool(quote)
 
 
 class HTMLDoc:
@@ -153,7 +188,7 @@ class ObjectHTML:
     def _set_doc(self, doc: HTMLDoc) -> None:
         if not isinstance(doc, HTMLDoc):
             raise ObjectHTMLTypeError()
-        unsafe = re.search(r'\s(on\w+|srcdoc|style)\s*=\s*["\'][^"\']*\{\{', doc.html)
+        unsafe = _UNSAFE_ATTR_SLOT_RE.search(doc.html)
         if unsafe:
             raise TemplateUnsafeSlotError(doc.name, unsafe.group(1))
         name = doc.name
@@ -289,8 +324,11 @@ class ObjectHTML:
             value = values[key]
             if not self.autoescape:
                 raw = str(value)
-            elif re.search(r'=\s*["\']$', html[max(0, m.start() - 16):m.start()]):
-                raw = html_lib.escape(str(value), quote=True)
+            elif _in_attr_value(html, m.start()):
+                if isinstance(value, AttrSafe):
+                    raw = str(value)
+                else:
+                    raw = html_lib.escape(str(value), quote=True)
             else:
                 raw = str(escape(value))
             indent = self._line_indent_before(html, m.start())

@@ -129,6 +129,22 @@ def _password_limit(password: str, policy: AuthPolicy, field: str) -> str:
     return value
 
 
+_LOGIN_USER_ID_MAX_CHARS = 1024
+_LOGIN_PASSWORD_MAX_BYTES = 1024
+
+
+def _login_password_limit(password: str, field: str) -> str:
+    """DoS bound only: login/reauth never apply the signup password policy."""
+    value = _required_text(password, field)
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise AuthInvalidFieldError(field) from None
+    if size > _LOGIN_PASSWORD_MAX_BYTES:
+        raise AuthInvalidFieldError(field)
+    return value
+
+
 def validate_password(password: str, policy: AuthPolicy, *, field: str = "password") -> str:
     value = _password_limit(password, policy, field)
     if len(value) < policy.password_min_len:
@@ -300,10 +316,14 @@ class AuthService:
         self.dbm = AuthDBM(db_path, policy=policy, clock=clock, logger=self.logger)
         self.ttl_sec = ttl_sec
         self.master_user = master_user
-        self.dbm.ensure_master_user(
-            user_id=master_user,
-            login_password=master_login_password,
-        )
+        try:
+            self.dbm.ensure_master_user(
+                user_id=master_user,
+                login_password=master_login_password,
+            )
+        except BaseException:
+            self.dbm.rip_connection()
+            raise
         # 起動時の master 作成ハッシュは要求駆動でないのでゲージに数えない (L-17: 初回要求は通る)
         self.dbm._hash_log.clear()
 
@@ -659,7 +679,7 @@ class AuthService:
         target = _required_text(data.get("target_user_id"), "target_user_id").strip()
         if not target:
             raise AuthMissingFieldError("target_user_id")
-        password = _password_limit(data.get("login_password"), self.policy, "login_password")
+        password = _login_password_limit(data.get("login_password"), "login_password")
         client_ip = normalize_ip(data.get("client_ip"))
         if not self.dbm.is_master_uid(session.uid):
             raise AuthForbiddenError()
@@ -1232,9 +1252,9 @@ class AuthDBM(DatabaseManager):
 
     def _authenticate(self, user_id: str, password: str, ip: str, *, reauth: bool = False):
         user_id = _required_text(user_id, "user_id")
-        if len(user_id) > 256:
+        if len(user_id) > _LOGIN_USER_ID_MAX_CHARS:
             raise AuthInvalidFieldError("user_id")
-        password = _password_limit(password, self.policy, "password")
+        password = _login_password_limit(password, "password")
         user_key, ip_key = f"login_user:{user_id}", f"login_ip:{ip}"
         self._locked_check_logged(ip_key, ip)
         self._locked_check_logged(user_key, ip)
@@ -1278,7 +1298,12 @@ class AuthDBM(DatabaseManager):
         row, needs_rehash = self._authenticate(user_id, password, ip)
         uid, user_id, public_name = row[:3]
         if needs_rehash:
-            self.execute("UPDATE users SET password_hash=?,password_salt='' WHERE uid=?", self._hash_password(password), uid)
+            # Conditional on the exact credentials we verified: a concurrent password
+            # change makes this a no-op (rehash happens on the next login instead).
+            self.execute(
+                "UPDATE users SET password_hash=?,password_salt='' "
+                "WHERE uid=? AND password_hash=? AND password_salt=?",
+                self._hash_password(password), uid, row[3], row[4])
         token, sid, now = _rand(32), _rand(), self.clock()
         exp = now + ttl_sec
         with self._transaction():
@@ -1330,7 +1355,7 @@ class AuthDBM(DatabaseManager):
         self._log_event("PUBLIC_NAME_CHANGE", subject=self.get_user_id_by_pid(uid) or "-")
 
     def reauth(self, *, uid: str, password: str, client_ip: str) -> None:
-        _password_limit(password, self.policy, "password")
+        _login_password_limit(password, "password")
         ip = normalize_ip(client_ip)
         user_id = self.get_user_id_by_pid(uid)
         if user_id is None:
@@ -1341,7 +1366,7 @@ class AuthDBM(DatabaseManager):
     def update_password(self, *, uid: str, current_password: str, new_password: str, client_ip: str) -> None:
         ip = normalize_ip(client_ip)
         validate_password(new_password, self.policy, field="new_password")
-        _password_limit(current_password, self.policy, "current_password")
+        _login_password_limit(current_password, "current_password")
         self.reauth(uid=uid, password=current_password, client_ip=ip)
         password_hash = self._hash_password(new_password)
         self.execute_many([

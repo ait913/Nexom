@@ -545,15 +545,16 @@ class MultiPartUploader:
             raise PsArgmentsError("total_chunks")
         if not isinstance(sha256, str) or not SHA256_RE.fullmatch(sha256):
             raise PsArgmentsError("sha256")
-        if self._PSDBM.count_active(pid) >= self.max_active_uploads_per_pid:
-            raise PsTooManyActiveUploadsError(self.max_active_uploads_per_pid)
         name = Path(Path(filename).name)
         suffix = name.suffix.lower()
         original_suffix = suffix if SUFFIX_RE.fullmatch(suffix) else None
         if original_suffix is None:
             suffix = FALLBACK_SUFFIX
-        public_id = self._PSDBM.register(
-            name.stem[:200], suffix, size, pid, original_suffix=original_suffix)
+        with self._PSDBM.immediate_transaction():
+            if self._PSDBM.count_active(pid) >= self.max_active_uploads_per_pid:
+                raise PsTooManyActiveUploadsError(self.max_active_uploads_per_pid)
+            public_id = self._PSDBM.register(
+                name.stem[:200], suffix, size, pid, original_suffix=original_suffix)
         working_dir = self.working_root / public_id
         working_dir.mkdir(parents=True, exist_ok=True)
         os.chmod(working_dir, 0o700)

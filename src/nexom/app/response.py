@@ -82,6 +82,7 @@ class Response:
         if include_charset and (ct.startswith("text/") or ct == "application/json"):
             ct = f"{ct}; charset={charset}"
 
+        _validate_header("Content-Type", ct)
         base = [("Content-Type", ct)]
         sec = list(type(self).security_headers.items()) if security_headers else []
         caller = list(headers or [])
@@ -185,7 +186,9 @@ class Redirect(Response):
     ) -> None:
         if status not in (301, 302, 303, 307, 308):
             raise ValueError("Invalid redirect status")
-        if not allow_external and not _is_local_location(location):
+        if not allow_external and (
+            (location and ord(location[0]) < 0x21) or not _is_local_location(location)
+        ):
             raise ResponseRedirectExternalError(location)
         extra = list(headers) if headers else []
         res_headers = [("Location", location), *extra]

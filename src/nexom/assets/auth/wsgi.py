@@ -46,11 +46,16 @@ def app(environ: dict, start_response: Callable) -> Iterable[bytes]:
     req: Request | None = None
     res: Response
     try:
-        req = Request(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)
+        # The caller guard and request parsing (400 on malformed input) live in
+        # service.handler; the Request below is only used for the access log.
         res = service.handler(environ)
     except Exception as e:
         logger.error(e)
         res = JsonResponse({"ok": False, "error": "InternalError"}, status=500)
+    try:
+        req = Request(environ, trusted_proxy_count=TRUSTED_PROXY_COUNT)
+    except Exception:
+        req = None
 
     try:
         dt_ms = int((time.time() - t0) * 1000)
