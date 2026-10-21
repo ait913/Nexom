@@ -638,6 +638,7 @@ def test_Q18_no_cookie_header():
 
 def test_Q19_remote_addr():
     env = make_environ()
+    env.pop("REMOTE_ADDR")  # make_environ の既定は 127.0.0.1 (auth doc §9.1)
     assert Request(env).remote_addr == ""
     env["REMOTE_ADDR"] = "10.1.2.3"
     assert Request(env).remote_addr == "10.1.2.3"
@@ -648,6 +649,7 @@ def test_Q19_remote_addr():
 
 def _xenv(xff=None, remote="127.0.0.1"):
     env = make_environ()
+    env.pop("REMOTE_ADDR", None)
     if remote is not None:
         env["REMOTE_ADDR"] = remote
     if xff is not None:
@@ -697,7 +699,9 @@ def test_X11_spoofed_left_side_not_taken():
 
 def test_X12_garbage_and_missing():
     assert Request(_xenv("garbage"), trusted_proxy_count=1).client_ip == "127.0.0.1"
-    r = Request(make_environ())
+    env = make_environ()
+    env.pop("REMOTE_ADDR")
+    r = Request(env)
     assert r.client_ip == "-" and r.remote_addr == ""
 
 

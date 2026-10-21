@@ -18,6 +18,7 @@ def make_environ(
         "PATH_INFO": path,
         "QUERY_STRING": query,
         "SERVER_NAME": "testserver",
+        "REMOTE_ADDR": "127.0.0.1",
         "SERVER_PORT": "80",
         "SERVER_PROTOCOL": "HTTP/1.1",
         "wsgi.input": BytesIO(body),

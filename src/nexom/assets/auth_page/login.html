@@ -161,14 +161,24 @@
       "A08": "このセッションは無効化されています。再度ログインしてください。",
       "A09": "認証サービスに接続できません。しばらく時間をおいて再度お試しください。",
 
+      "A11": "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+      "A12": "入力内容の形式が正しくありません。",
+      "A12.user_id": "ユーザーIDは半角小文字英数字で始まり、英数字・_ . - のみ、3〜32 文字です。",
+      "A12.public_name": "公開名は 1〜64 文字で、< > や制御文字は使えません。",
+      "A12.password": "パスワードは 8 文字以上 (256 バイト以内) にしてください。",
+      "A13": "この操作は許可されていません。ページを再読み込みしてください。",
+
       // fallback
       "DEFAULT": "エラーが発生しました。もう一度お試しください。"
     };
-    function getErrorMessage(code) {
+    function getErrorMessage(code, field) {
       if (typeof code !== "string") {
         return error_code_for_message.DEFAULT;
       }
     
+      if (code === "A12" && field) {
+        return error_code_for_message[`A12.${field}`] ?? error_code_for_message.A12;
+      }
       return error_code_for_message[code] ?? error_code_for_message.DEFAULT;
     }
 
@@ -180,9 +190,9 @@
       msg.className = "msg";
       msg.textContent = "";
     }
-    function setError(text){
+    function setError(code, field){
       msg.className = "msg is-error";
-      msg.textContent = getErrorMessage(text);
+      msg.textContent = getErrorMessage(code, field);
     }
 
     async function postJSON(path, bodyObj){
@@ -219,7 +229,7 @@
 
         if (!r.ok || !r.data || r.data.ok !== true){
           const code = (r.data && r.data.error) ? String(r.data.error) : "UnknownError";
-          setError(code);
+          setError(code, r.data && r.data.field);
           return;
         }
 
