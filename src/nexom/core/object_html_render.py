@@ -113,7 +113,13 @@ _IMPORT_LINE_RE: Final = re.compile(r"(?m)^([ \t]*)<Import\s+([\w\.]+)\s*/>\s*$"
 # tokenizer state at its start.  Inside a quoted attribute value "<", "<!--"
 # and ">" never change state (they are part of the value); inside a tag both
 # whitespace and "/" separate attributes (so "<p/onclick=" is an attribute);
-# <script>/<style> bodies are RAWTEXT until the matching end tag.
+# <script>/<style> bodies are RAWTEXT until the matching end tag.  <script>
+# bodies additionally follow the spec's escaped ("<!--" ... "-->") and
+# double-escaped (escaped + "<script" ... "</script") states, where "</script"
+# does not end the body.  Inside foreign content (<svg> / <math>, tracked with
+# an element stack) "<![CDATA[" opens a CDATA section (until "]]>") and
+# <script>/<style> stay in DATA but their bodies are still rejected; outside
+# foreign content "<![CDATA[" is a bogus comment (until ">").
 
 DATA: Final = "DATA"
 TAG_OPEN: Final = "TAG_OPEN"              # reading the tag name
@@ -123,20 +129,31 @@ ATTR_VALUE_SQ: Final = "ATTR_VALUE_SQ"
 ATTR_VALUE_UNQUOTED: Final = "ATTR_VALUE_UNQUOTED"
 COMMENT: Final = "COMMENT"
 RAWTEXT: Final = "RAWTEXT"
+CDATA: Final = "CDATA"                    # <![CDATA[ ... ]]> inside foreign content
 
 _ATTR_VALUE_STATES: Final = frozenset({ATTR_VALUE_DQ, ATTR_VALUE_SQ})
 _RAWTEXT_TAGS: Final = frozenset({"script", "style"})
+_FOREIGN_TAGS: Final = frozenset({"svg", "math"})
+_VOID_TAGS: Final = frozenset({
+    "br", "img", "input", "meta", "link", "hr", "area", "base", "col", "embed",
+    "source", "track", "wbr", "param",
+})
 _WS: Final = " \t\n\r\f"
 _UNSAFE_ATTR_RE: Final = re.compile(r"on\w+|srcdoc|style")
 
 
 class SlotInfo(NamedTuple):
-    """Tokenizer state at a slot start (attr / tag are lowercase, None when not applicable)."""
+    """Tokenizer state at a slot start (attr / tag are lowercase, None when not applicable).
+
+    inside_foreign_script: the element stack holds a <script>/<style> opened inside
+    foreign content (<svg>/<math>), where its body is tokenized as DATA / CDATA.
+    """
 
     start: int
     state: str
     attr: str | None
     tag: str | None
+    inside_foreign_script: bool = False
 
 
 def _classify_slots(html: str) -> list[SlotInfo]:
@@ -156,13 +173,39 @@ def _classify_slots(html: str) -> list[SlotInfo]:
     closing = False   # </tag>
     attr = ""         # current attribute name
     raw_tag = ""      # tag whose RAWTEXT body we are in
+    # <script> RAWTEXT sub-state (HTML spec "script data (double) escaped"):
+    # "" (plain), "escaped" (after "<!--"), "double" (escaped + "<script").
+    esc = ""
+    dashes = 0        # consecutive "-" seen in an escaped state ("-->" / "<!-->" end it)
+    comment_end = "-->"   # "-->" for <!-- ... -->, ">" for a bogus comment
+    stack: list[str] = []  # open element names (lowercase), for foreign content tracking
+    foreign_depth = 0      # number of <svg> / <math> on the stack
 
-    def end_tag() -> str:
-        nonlocal tag, attr, sub, closing, raw_tag
+    def name_at(pos: int, name: str) -> bool:
+        """html[pos:] starts with name (case-insensitive) followed by WS, "/", ">" or EOF."""
+        end = pos + len(name)
+        return html[pos:end].lower() == name and (end >= n or html[end] in _WS + "/>")
+
+    def end_tag(self_closing: bool) -> str:
+        nonlocal tag, attr, sub, closing, raw_tag, esc, dashes, foreign_depth
         next_state = DATA
-        if not closing and tag in _RAWTEXT_TAGS:
-            raw_tag = tag
-            next_state = RAWTEXT
+        if closing:
+            if tag in stack:
+                while stack:
+                    popped = stack.pop()
+                    if popped in _FOREIGN_TAGS:
+                        foreign_depth -= 1
+                    if popped == tag:
+                        break
+        elif tag and tag[0] not in "!?":
+            if tag in _RAWTEXT_TAGS and foreign_depth == 0:
+                # HTML content: the self-closing flag is ignored for <script>/<style>.
+                raw_tag, esc, dashes = tag, "", 0
+                next_state = RAWTEXT
+            elif not self_closing and tag not in _VOID_TAGS:
+                stack.append(tag)
+                if tag in _FOREIGN_TAGS:
+                    foreign_depth += 1
         tag, attr, sub, closing = "", "", "", False
         return next_state
 
@@ -174,15 +217,24 @@ def _classify_slots(html: str) -> list[SlotInfo]:
                 slot_state = ATTR_VALUE_UNQUOTED
             slot_attr = attr or None
             slot_tag = (raw_tag if state == RAWTEXT else tag) or None
-            out.append(SlotInfo(start, slot_state, slot_attr, slot_tag))
+            in_fs = foreign_depth > 0 and any(t in _RAWTEXT_TAGS for t in stack)
+            out.append(SlotInfo(start, slot_state, slot_attr, slot_tag, in_fs))
             slot_i += 1
             i = end  # the slot text itself never drives the tokenizer
             continue
         ch = html[i]
         if state == DATA:
             if html.startswith("<!--", i):
-                state = COMMENT
+                state, comment_end = COMMENT, "-->"
                 i += 4
+                continue
+            if html[i:i + 9].lower() == "<![cdata[":
+                if foreign_depth > 0:
+                    state = CDATA
+                    i += 9
+                else:
+                    state, comment_end = COMMENT, ">"  # bogus comment in HTML content
+                    i += 2
                 continue
             if ch == "<" and i + 1 < n:
                 nxt = html[i + 1]
@@ -200,29 +252,57 @@ def _classify_slots(html: str) -> list[SlotInfo]:
                     continue
             i += 1
         elif state == COMMENT:
-            if html.startswith("-->", i):
+            if html.startswith(comment_end, i):
+                state = DATA
+                i += len(comment_end)
+                continue
+            i += 1
+        elif state == CDATA:
+            if html.startswith("]]>", i):
                 state = DATA
                 i += 3
                 continue
             i += 1
         elif state == RAWTEXT:
-            end = i + 2 + len(raw_tag)
-            if (ch == "<" and html.startswith("/", i + 1)
-                    and html[i + 2:end].lower() == raw_tag
-                    and (end >= n or html[end] in _WS + "/>")):
-                state, tag, closing, raw_tag = TAG_OPEN, "", True, ""
-                i += 2
-                continue
+            if ch == "<":
+                if (esc != "double" and html.startswith("/", i + 1)
+                        and name_at(i + 2, raw_tag)):
+                    # appropriate end tag: </script ... > / </style ... >
+                    state, tag, closing, raw_tag, esc = TAG_OPEN, "", True, "", ""
+                    i += 2
+                    continue
+                if raw_tag == "script":
+                    if esc == "" and html.startswith("<!--", i):
+                        esc, dashes = "escaped", 2  # "<!--" lands in the dash-dash state
+                        i += 4
+                        continue
+                    if esc == "escaped" and name_at(i + 1, "script"):
+                        esc, dashes = "double", 0
+                        i += 1 + len("script")
+                        continue
+                    if (esc == "double" and html.startswith("/", i + 1)
+                            and name_at(i + 2, "script")):
+                        esc, dashes = "escaped", 0  # leaves double-escape only; body goes on
+                        i += 2 + len("script")
+                        continue
+                dashes = 0
+            elif esc and ch == "-":
+                dashes = min(dashes + 1, 2)
+            elif esc and ch == ">" and dashes >= 2:
+                esc, dashes = "", 0  # "-->" returns to plain script data (from either state)
+            else:
+                dashes = 0
             i += 1
         elif state == TAG_OPEN:
             if ch in _WS or ch == "/":
                 state, sub = IN_TAG, ""
             elif ch == ">":
-                state = end_tag()
+                state = end_tag(False)
             else:
                 tag += ch.lower()
             i += 1
         elif state == IN_TAG:
+            self_closing = i > 0 and html[i - 1] == "/"
             if sub == "name":
                 if ch in _WS:
                     sub = "after_name"
@@ -231,7 +311,7 @@ def _classify_slots(html: str) -> list[SlotInfo]:
                 elif ch == "=":
                     sub = "before_value"
                 elif ch == ">":
-                    state = end_tag()
+                    state = end_tag(self_closing)
                 else:
                     attr += ch.lower()
             elif sub == "after_name":
@@ -242,7 +322,7 @@ def _classify_slots(html: str) -> list[SlotInfo]:
                 elif ch == "/":
                     sub, attr = "", ""
                 elif ch == ">":
-                    state = end_tag()
+                    state = end_tag(self_closing)
                 else:
                     sub, attr = "name", ch.lower()
             elif sub == "before_value":
@@ -253,14 +333,14 @@ def _classify_slots(html: str) -> list[SlotInfo]:
                 elif ch == "'":
                     state = ATTR_VALUE_SQ
                 elif ch == ">":
-                    state = end_tag()
+                    state = end_tag(False)
                 else:
                     state = ATTR_VALUE_UNQUOTED
             else:  # expecting an attribute name, a separator or the end of the tag
                 if ch in _WS or ch == "/":
                     pass
                 elif ch == ">":
-                    state = end_tag()
+                    state = end_tag(self_closing)
                 else:
                     sub, attr = "name", ch.lower()
             i += 1
@@ -276,7 +356,7 @@ def _classify_slots(html: str) -> list[SlotInfo]:
             if ch in _WS:
                 state, sub, attr = IN_TAG, "", ""
             elif ch == ">":
-                state = end_tag()
+                state = end_tag(False)  # "/" before ">" belongs to the unquoted value
             i += 1
         else:  # pragma: no cover - defensive
             i += 1
@@ -285,7 +365,9 @@ def _classify_slots(html: str) -> list[SlotInfo]:
 
 def _unsafe_slot_reason(info: SlotInfo) -> str | None:
     """Reason string for OH06 when the slot position is unsafe, else None."""
-    if info.state == RAWTEXT:
+    if info.state == CDATA:
+        return "cdata"
+    if info.state == RAWTEXT or info.inside_foreign_script:
         return "script/style body"
     if info.state == ATTR_VALUE_UNQUOTED:
         return "unquoted attribute"
@@ -349,9 +431,11 @@ class ObjectHTML:
     - Final {{slot}} replacement is applied (strict)
 
     Slot positions are classified by a one-pass HTML tokenizer at load time.
-    Slots inside <script>/<style> bodies, comments, unquoted attribute values,
-    tag/attribute-name position, or on*/srcdoc/style attribute values are
-    rejected with TemplateUnsafeSlotError (OH06) regardless of autoescape:
+    Slots inside <script>/<style> bodies (including escaped / double-escaped
+    script data and <script>/<style> opened inside <svg>/<math>), CDATA
+    sections, comments, unquoted attribute values, tag/attribute-name position,
+    or on*/srcdoc/style attribute values are rejected with
+    TemplateUnsafeSlotError (OH06) regardless of autoescape:
     <script>let x={{ x }}</script> with x="alert(1)" would execute code.
     Use json_script(data, element_id="boot") and parse the element's
     textContent with JSON.parse in JavaScript. Do not use it with innerHTML.

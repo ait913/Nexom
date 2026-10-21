@@ -188,13 +188,16 @@ class Redirect(Response):
             raise ValueError("Invalid redirect status")
         # Header-injection class first (CR/LF and other controls -> RS01, as for any header).
         _validate_header("Location", location)
-        # Local redirects: reject a leading space and any C0 control / DEL anywhere
-        # (browsers strip TAB/LF/CR mid-string, so "/\t\\evil" becomes "/\\evil").
-        if not allow_external and (
-            (location and location[0] == " ")
+        # Location-specific rejects, regardless of allow_external: empty, a leading
+        # space, or a TAB anywhere (legal in a header value, but the WHATWG URL
+        # parser strips it, so "/\t\\evil" becomes "/\\evil" and " /\\evil" external).
+        if (
+            not location
+            or location[0] == " "
             or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in location)
-            or not _is_local_location(location)
         ):
+            raise ResponseRedirectExternalError(location)
+        if not allow_external and not _is_local_location(location):
             raise ResponseRedirectExternalError(location)
         extra = list(headers) if headers else []
         res_headers = [("Location", location), *extra]

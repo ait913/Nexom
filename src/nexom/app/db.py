@@ -198,7 +198,7 @@ class DatabaseManager:
             return rows
 
         except Error as e:
-            self._conn.rollback()
+            self._rollback_outside_transaction()
             _call_error_handler(e)
 
 
@@ -215,6 +215,23 @@ class DatabaseManager:
                 self._conn.commit()
 
         except Error as e:
-            self._conn.rollback()
+            self._rollback_outside_transaction()
             _call_error_handler(e)
-        
+
+    def _rollback_outside_transaction(self) -> None:
+        """
+        Roll back after a failed statement unless an immediate_transaction() block is open.
+
+        Inside immediate_transaction() the rollback is left to the context manager:
+        ROLLBACK TO <savepoint> for nested blocks, ROLLBACK for the outermost one.
+        A connection-wide rollback here would discard the outer block's changes
+        and locks when the inner error is caught and the outer block continues.
+
+        Outside a block the legacy behaviour is kept.  (``in_transaction`` is not
+        used as the criterion: sqlite3 opens an implicit transaction before any
+        DML, so it is True right after a failed INSERT even in auto-commit mode.)
+        """
+        if self._conn is None or self._tx_depth > 0:
+            return
+        self._conn.rollback()
+

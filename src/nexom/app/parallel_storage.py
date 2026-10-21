@@ -358,10 +358,10 @@ class ParallelStorageDBM(DatabaseManager):
         return meta
 
     @staticmethod
-    def _check_owner(meta: FileMeta, pid: str, *, force: bool = False) -> None:
-        if not force and (not isinstance(pid, str) or not pid):
-            raise PsArgmentsError("pid")
-        if not force and meta.pid != pid:
+    def _check_owner(meta: FileMeta, pid: str | None, *, force: bool = False) -> None:
+        # force=False: a missing / empty / mismatching pid is an ownership failure
+        # (PsPermissionError), not an argument error (A-5b).  force=True ignores pid.
+        if not force and (not isinstance(pid, str) or not pid or meta.pid != pid):
             raise PsPermissionError()
 
     @staticmethod
