@@ -1,7 +1,7 @@
 """Framework error definitions."""
 
 from __future__ import annotations
-from typing import Any
+from typing import Any, ClassVar, Iterable
 
 
 class NexomError(Exception):
@@ -12,6 +12,8 @@ class NexomError(Exception):
         code: Stable error code for programmatic handling.
         message: Human-readable error message.
     """
+
+    http_status: ClassVar[int] = 500
 
     def __init__(self, code: str, message: str) -> None:
         self.code: str = code
@@ -39,6 +41,8 @@ class CommandArgumentsError(NexomError):
 
 class PathNotFoundError(NexomError):
     """Raised when no matching route is found."""
+
+    http_status: ClassVar[int] = 404
 
     def __init__(self, path: str) -> None:
         super().__init__("P01", f"This path is not found. '{path}'")
@@ -73,6 +77,53 @@ class PathHandlerMissingArgError(NexomError):
         )
 
 
+class PathMethodNotAllowedError(NexomError):
+    """Raised when a route does not allow the request method."""
+
+    http_status: ClassVar[int] = 405
+
+    def __init__(self, path: str, allowed: Iterable[str]) -> None:
+        self.allowed: frozenset[str] = frozenset(allowed)
+        self.allow_header: str = ", ".join(sorted(self.allowed))
+        super().__init__("P05", f"Method is not allowed for this path. '{path}'")
+
+
+# =========================
+# Request / Response
+# =========================
+
+class RequestEntityTooLargeError(NexomError):
+    """Raised when a request exceeds the entity size limit."""
+
+    http_status: ClassVar[int] = 413
+
+    def __init__(self) -> None:
+        super().__init__("RQ01", "Request entity is too large.")
+
+
+class RequestParseError(NexomError):
+    """Raised when parsing fails; detail must be a constant string."""
+
+    http_status: ClassVar[int] = 400
+
+    def __init__(self, detail: str) -> None:
+        super().__init__("RQ02", f"Request could not be parsed. ({detail})")
+
+
+class ResponseHeaderInvalidError(NexomError):
+    """Raised when a response header is invalid."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__("RS01", f"Invalid response header. '{name}'")
+
+
+class ResponseRedirectExternalError(NexomError):
+    """Raised when an external redirect is not allowed."""
+
+    def __init__(self, location: str) -> None:
+        super().__init__("RS02", f"External redirect is not allowed. '{location}'")
+
+
 # =========================
 # Cookie
 # =========================
@@ -82,6 +133,13 @@ class CookieInvalidValueError(NexomError):
 
     def __init__(self, value: str) -> None:
         super().__init__("C01", f"This value is invalid. '{value}'")
+
+
+class CookieInvalidAttributeError(NexomError):
+    """Raised when a cookie attribute is invalid."""
+
+    def __init__(self, name: str, detail: str) -> None:
+        super().__init__("C02", f"Invalid cookie attribute. '{name}' ({detail})")
 
 
 # =========================
@@ -156,6 +214,17 @@ class ObjectHTMLTypeError(NexomError):
         super().__init__(
             "OH05",
             f"This doc is not HTMLDoc'",
+        )
+
+
+class TemplateUnsafeSlotError(NexomError):
+    """Raised when a slot appears inside an unsafe HTML attribute."""
+
+    def __init__(self, doc_name: str, attr: str) -> None:
+        super().__init__(
+            "OH06",
+            f"Slot inside unsafe attribute '{attr}' in template '{doc_name}'. "
+            "Use json_script()/safe_url() or move the value out of the attribute.",
         )
 
 

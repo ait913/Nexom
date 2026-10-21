@@ -15,6 +15,14 @@ PORT: int = __g_port__
 WORKERS: int = __g_workers__
 RELOAD: bool = __g_reload__
 
+# ======== request ========
+MAX_BODY_SIZE: int = 10 * 1024 * 1024   # bytes; shared by body, json, form, and files (multipart)
+
+# ======== proxy ========
+# Reverse proxies in front of gunicorn. 0 trusts only REMOTE_ADDR.
+# Use 1 for the nginx/apache gateway, or 2 for Cloudflare -> nginx.
+TRUSTED_PROXY_COUNT: int = __g_trusted_proxies__
+
 # ======== auth ========
 AUTH_SERVER: str = "http://127.0.0.1:7070"
 

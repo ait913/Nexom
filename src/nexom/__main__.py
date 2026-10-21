@@ -19,7 +19,7 @@ from nexom.buildTools.run import run_project
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
-        prog="naxom",
+        prog="nexom",
         description="Nexom Web Framework CLI",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -50,33 +50,49 @@ def main(argv: list[str] | None = None) -> None:
     sp.add_argument("--domain", default="", help="Domain for gateway template (default: placeholder text)")
 
     # ports etc (main)
-    sp.add_argument("--address", default="0.0.0.0", help="Bind address for main app (default: 0.0.0.0)")
+    sp.add_argument("--address", default="127.0.0.1", help="Bind address for main app (default: 127.0.0.1; pass 0.0.0.0 to listen on all interfaces)")
     sp.add_argument("--port", type=int, default=8080, help="Bind port for main app (default: 8080)")
     sp.add_argument("--workers", type=int, default=4, help="Gunicorn workers for main app (default: 4)")
     sp.add_argument("--reload", action="store_true", help="Enable auto-reload for main app (development)")
+    sp.add_argument(
+        "--trusted-proxy-count", type=int, default=None,
+        help="Number of trusted reverse proxies in front of gunicorn (default: 1 if --gateway is set, else 0)",
+    )
 
     # ports etc (auth)
-    sp.add_argument("--auth-address", default="127.0.0.1", help="Bind address for auth app (default: 0.0.0.0)")
+    sp.add_argument("--auth-address", default="127.0.0.1", help="Bind address for auth app (default: 127.0.0.1; keep it loopback unless you know why)")
     sp.add_argument("--auth-port", type=int, default=7070, help="Bind port for auth app (default: 7070)")
     sp.add_argument("--auth-workers", type=int, default=4, help="Gunicorn workers for auth app (default: 4)")
     sp.add_argument("--auth-reload", action="store_true", help="Enable auto-reload for auth app (development)")
+    sp.add_argument(
+        "--auth-trusted-proxy-count", type=int, default=None,
+        help="Number of trusted reverse proxies in front of gunicorn (default: 0)",
+    )
 
     # create-auth
     pa = subparsers.add_parser("create-auth", help="Create a Nexom auth app project")
     pa.add_argument("--out", default=".", help="Output directory (default: current directory)")
-    pa.add_argument("--address", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    pa.add_argument("--address", default="127.0.0.1", help="Bind address for auth app (default: 127.0.0.1; keep it loopback unless you know why)")
     pa.add_argument("--port", type=int, default=7070, help="Bind port (default: 7070)")
     pa.add_argument("--workers", type=int, default=4, help="Gunicorn workers (default: 4)")
     pa.add_argument("--reload", action="store_true", help="Enable auto-reload (development)")
+    pa.add_argument(
+        "--trusted-proxy-count", type=int, default=None,
+        help="Number of trusted reverse proxies in front of gunicorn (default: 0)",
+    )
 
     # create-app
     p = subparsers.add_parser("create-app", help="Create a Nexom app project")
     p.add_argument("app_name", help="App project name")
     p.add_argument("--out", default=".", help="Output directory (default: current directory)")
-    p.add_argument("--address", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
+    p.add_argument("--address", default="127.0.0.1", help="Bind address for main app (default: 127.0.0.1; pass 0.0.0.0 to listen on all interfaces)")
     p.add_argument("--port", type=int, default=8080, help="Bind port (default: 8080)")
     p.add_argument("--workers", type=int, default=4, help="Gunicorn workers (default: 4)")
     p.add_argument("--reload", action="store_true", help="Enable auto-reload (development)")
+    p.add_argument(
+        "--trusted-proxy-count", type=int, default=None,
+        help="Number of trusted reverse proxies in front of gunicorn (default: 1 if --gateway-config is set, else 0)",
+    )
     p.add_argument(
         "--gateway-config",
         choices=["nginx", "apache"],
@@ -90,10 +106,14 @@ def main(argv: list[str] | None = None) -> None:
     pc.add_argument("app_name", help="Existing app directory name")
     pc.add_argument("--out", default=".", help="Project root directory (default: current directory)")
     pc.add_argument("--auth", action="store_true", help="Use auth config template")
-    pc.add_argument("--address", default="0.0.0.0", help="Bind address")
+    pc.add_argument("--address", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     pc.add_argument("--port", type=int, default=None, help="Bind port")
     pc.add_argument("--workers", type=int, default=4, help="Gunicorn workers")
     pc.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    pc.add_argument(
+        "--trusted-proxy-count", type=int, default=None,
+        help="Number of trusted reverse proxies in front of gunicorn (default: 0)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -113,12 +133,14 @@ def main(argv: list[str] | None = None) -> None:
             port=args.port,
             workers=args.workers,
             reload=args.reload,
+            trusted_proxy_count=args.trusted_proxy_count,
         )
         auth_opt = AppBuildOptions(
             address=args.auth_address,
             port=args.auth_port,
             workers=args.auth_workers,
             reload=args.auth_reload,
+            trusted_proxy_count=args.auth_trusted_proxy_count,
         )
         out = start_project(
             project_root=Path(args.root),
@@ -142,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
             port=args.port,
             workers=args.workers,
             reload=args.reload,
+            trusted_proxy_count=args.trusted_proxy_count,
         )
         out_dir = create_app(
             Path(args.out),
@@ -161,6 +184,7 @@ def main(argv: list[str] | None = None) -> None:
             port=args.port,
             workers=args.workers,
             reload=args.reload,
+            trusted_proxy_count=args.trusted_proxy_count,
         )
         out_dir = create_auth(
             Path(args.out),
@@ -182,6 +206,7 @@ def main(argv: list[str] | None = None) -> None:
             port=(default_port if args.port is None else args.port),
             workers=args.workers,
             reload=args.reload,
+            trusted_proxy_count=args.trusted_proxy_count,
         )
         out_file = create_config(
             Path(args.out),

@@ -1,5 +1,6 @@
 """Default page handler template."""
 
+from nexom.app import Markup
 from nexom.app.request import Request
 from nexom.app.response import Response, HtmlResponse
 
@@ -18,7 +19,7 @@ def main(request: Request, args: dict) -> Response:
     session = ac.verify_token(token) if token else None
 
     if session:
-        msg = f"Hello <i>{session.public_name}@{session.user_id}</i> San!!"
+        msg = Markup("Hello <i>{}@{}</i> San!!").format(session.public_name, session.user_id)
     else:
         msg = "Not Logined." 
 

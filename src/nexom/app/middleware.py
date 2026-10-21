@@ -72,6 +72,10 @@ class CORSMiddleware:
         self.allowed_headers = allowed_headers or ["Content-Type", "Authorization"]
         self.allow_credentials = access_control_allow_credentials
         self.max_age = max_age
+        if self.allow_credentials and ("*" in self.allowed_origins or "null" in self.allowed_origins):
+            raise ValueError(
+                "CORSMiddleware: allow_credentials=True requires an explicit allowed_origins list (no '*' / 'null')."
+            )
 
     def _is_allowed_origin(self, origin: str) -> bool:
         return "*" in self.allowed_origins or origin in self.allowed_origins

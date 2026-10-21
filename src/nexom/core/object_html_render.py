@@ -2,17 +2,80 @@
 
 from __future__ import annotations
 
+import html as html_lib
+import json
 import re
 from collections import UserList
-from typing import Final
+from typing import Final, Iterable
 
 from .error import (
     HTMLDocLibNotFoundError,
     ObjectHTMLImportError,
     ObjectHTMLInsertValueError,
     ObjectHTMLExtendsError,
-    ObjectHTMLTypeError
+    ObjectHTMLTypeError,
+    TemplateUnsafeSlotError,
 )
+
+
+class Markup(str):
+    """Trusted HTML fragment that bypasses text slot escaping."""
+
+    __slots__ = ()
+
+    def __html__(self) -> str:
+        return str(self)
+
+    def __add__(self, other: object) -> Markup:
+        return Markup(str(self) + str(escape(other)))
+
+    def __radd__(self, other: object) -> Markup:
+        return Markup(str(escape(other)) + str(self))
+
+    def join(self, iterable: Iterable[object]) -> Markup:
+        return Markup(str(self).join(str(escape(value)) for value in iterable))
+
+    def format(self, *args: object, **kwargs: object) -> Markup:
+        return Markup(str(self).format(
+            *(escape(value) for value in args),
+            **{key: escape(value) for key, value in kwargs.items()},
+        ))
+
+    def __repr__(self) -> str:
+        return f"Markup({str(self)!r})"
+
+
+def escape(value: object) -> Markup:
+    """Escape HTML text, preserving Markup and callable __html__ values."""
+    if isinstance(value, Markup):
+        return value
+    html_method = getattr(value, "__html__", None)
+    if callable(html_method):
+        return Markup(html_method())
+    return Markup(html_lib.escape(str(value), quote=True))
+
+
+def safe_url(
+    value: object, *, allowed_schemes: tuple[str, ...] = ("http", "https", "mailto")
+) -> Markup:
+    """Decode, validate and escape a URL, including trusted Markup inputs."""
+    raw = html_lib.unescape(str(value))
+    probe = re.sub(r"[\x00-\x20]", "", raw).lower()
+    match = re.match(r"^([a-z][a-z0-9+.\-]*):", probe)
+    if match and match.group(1) not in allowed_schemes:
+        return Markup("")
+    return Markup(html_lib.escape(raw, quote=True))
+
+
+def json_script(value: object, element_id: str | None = None) -> Markup:
+    """Embed JSON safely against HTML parser breakout, not innerHTML use."""
+    if element_id is not None and re.fullmatch(r"[A-Za-z0-9_-]+", element_id) is None:
+        raise ValueError("Invalid JSON script element id.")
+    data = json.dumps(value, ensure_ascii=False)
+    data = data.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    if element_id is not None:
+        data = f'<script id="{element_id}" type="application/json">{data}</script>'
+    return Markup(data)
 
 
 # Slots: {{ key }}
@@ -68,10 +131,18 @@ class ObjectHTML:
     - Extends/Insert are applied first (non-strict slots for inserts)
     - Imports are expanded with indentation preserved
     - Final {{slot}} replacement is applied (strict)
+
+    Slots inside script bodies are unsupported and unsafe:
+    <script>let x={{ x }}</script> with x="alert(1)" executes code.
+    Use json_script(data, element_id="boot") and parse the element's
+    textContent with JSON.parse in JavaScript. Do not use it with innerHTML.
     """
 
-    def __init__(self, *docs: HTMLDoc, lib: HTMLDocLib | None = None) -> None:
+    def __init__(
+        self, *docs: HTMLDoc, lib: HTMLDocLib | None = None, autoescape: bool = True
+    ) -> None:
         self.lib = lib or HTMLDocLib()
+        self.autoescape = autoescape
         for doc in docs:
             self.lib.append(doc)
 
@@ -82,16 +153,24 @@ class ObjectHTML:
     def _set_doc(self, doc: HTMLDoc) -> None:
         if not isinstance(doc, HTMLDoc):
             raise ObjectHTMLTypeError()
-        def _call(**kwargs: str) -> str:
+        unsafe = re.search(r'\s(on\w+|srcdoc|style)\s*=\s*["\'][^"\']*\{\{', doc.html)
+        if unsafe:
+            raise TemplateUnsafeSlotError(doc.name, unsafe.group(1))
+        name = doc.name
+        if (not name.isidentifier() or name.startswith("_")
+                or hasattr(type(self), name) or name in self.__dict__):
+            return
+
+        def _call(**kwargs: object) -> Markup:
             return self.render(doc.name, **kwargs)
 
         setattr(self, doc.name, _call)
 
-    def render(self, name: str, **kwargs: str) -> str:
+    def render(self, name: str, **kwargs: object) -> Markup:
         """Render a template by name."""
         html = self._render_structure(name)
         # Final strict slot fill (indent-aware)
-        return self._apply_slots_strict(html, kwargs)
+        return Markup(self._apply_slots_strict(html, kwargs))
 
     # -------------------------
     # phases
@@ -201,13 +280,19 @@ class ObjectHTML:
 
         return _SLOT_RE.sub(repl, html)
 
-    def _apply_slots_strict(self, html: str, values: dict[str, str]) -> str:
+    def _apply_slots_strict(self, html: str, values: dict[str, object]) -> str:
         def repl(m: re.Match) -> str:
             key = m.group(1)
             if key not in values:
                 raise ObjectHTMLInsertValueError(key)
 
-            raw = str(values[key])
+            value = values[key]
+            if not self.autoescape:
+                raw = str(value)
+            elif re.search(r'=\s*["\']$', html[max(0, m.start() - 16):m.start()]):
+                raw = html_lib.escape(str(value), quote=True)
+            else:
+                raw = str(escape(value))
             indent = self._line_indent_before(html, m.start())
             if indent:
                 return self._indent_multiline_slot_value(raw, indent)
