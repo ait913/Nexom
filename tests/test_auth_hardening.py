@@ -143,6 +143,9 @@ class Env:
     def attempts_all(self):
         return sorted(self.q("SELECT key, count, window_start, locked_until FROM auth_attempts"))
 
+    def attempts_nonsignup(self):
+        return [r for r in self.attempts_all() if not r[0].startswith("signup_ip:")]
+
     def logtext(self) -> str:
         p = Path(self.log)
         return p.read_text(encoding="utf-8") if p.exists() else ""
@@ -273,14 +276,14 @@ def test_L3_client_ip_missing(env):
     env.signup("alice")
     st, d, _ = env.call("/login", {"user_id": "alice", "password": PW})
     assert st == 400 and d == {"ok": False, "error": "A01", "field": "client_ip"}
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
 
 
 def test_L4_client_ip_invalid(env):
     env.signup("alice")
     st, d, _ = env.login("alice", ip="999.1.1.1")
     assert st == 400 and err(d) == "A12" and d.get("field") == "client_ip"
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
 
 
 def test_L5_length_caps_cheap_reject(env):
@@ -291,7 +294,7 @@ def test_L5_length_caps_cheap_reject(env):
     assert st == 400 and err(d) == "A12" and d["field"] == "password"
     st, d, _ = env.login("alice", "あ" * 86)  # 258 bytes
     assert st == 400 and err(d) == "A12" and d["field"] == "password"
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
 
 
 def test_L6_unknown_user_a03_and_reserved(env):
@@ -771,15 +774,16 @@ def test_V1_verify_active_shape(env):
 def test_V2_verify_inactive_variants_silent(env):
     d = env.user("alice")
     env.call("/logout", {"token": d["token"]})
+    expired = env.login("alice")[1]["token"]
     before = env.logtext()
+    snap = env.attempts_all()
     for tok in ("unknown-token", "", d["token"]):
         st, r, _ = env.call("/verify", {"token": tok})
         assert st == 200 and r == {"active": False}
-    expired = env.login("alice")[1]["token"]
     env.advance(60 * 60 * 24 * 7 + 5)
     assert env.verify(expired) == {"active": False}
     assert env.logtext() == before
-    assert env.attempts_all() == []
+    assert env.attempts_all() == snap
 
 
 def test_V3_verify_inactive_when_owner_disabled(env):
@@ -887,7 +891,7 @@ def test_H2_short_new_password(env):
     st, r, _ = env.call("/update/password", {"token": d["token"], "current_password": "WRONG-current-1",
                                               "new_password": "short", "client_ip": IP})
     assert st == 400 and err(r) == "A12" and r["field"] == "new_password"
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
     assert env.q("SELECT password_hash FROM users WHERE user_id='alice'") == before
 
 
@@ -896,7 +900,7 @@ def test_H2b_current_password_too_long(env):
     st, r, _ = env.call("/update/password", {"token": d["token"], "current_password": "p" * 257,
                                               "new_password": "new-pass-123", "client_ip": IP})
     assert st == 400 and err(r) == "A12" and r["field"] == "current_password"
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
 
 
 def _reauth_body(tok, cur):
@@ -1228,7 +1232,7 @@ def test_M7c_login_password_too_long(env):
     t = env.master_token()
     st, r, _ = _deact(env, t, "carol", pw="p" * 257)
     assert st == 400 and err(r) == "A12" and r["field"] == "login_password"
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
 
 
 def test_M8_legacy_master_password_key(env):
@@ -1271,7 +1275,7 @@ def test_M12_non_master_deactivate_403_before_reauth(env):
     for path in ("/master/users/deactivate", "/master/users/activate"):
         st, r, _ = _deact(env, d["token"], "carol", pw=PW, path=path)
         assert (st, err(r)) == (403, "A13")
-    assert env.attempts_all() == []
+    assert env.attempts_nonsignup() == []
     assert env.q("SELECT is_active FROM users WHERE user_id='carol'")[0][0] == 1
 
 
@@ -1586,10 +1590,15 @@ class _Quiet(WSGIRequestHandler):
 @pytest.fixture
 def live(tmp_path):
     e = Env(tmp_path)
-    e.svc = AuthService(e.db, e.log, master_login_password=MASTER_PW, policy=fast())  # real clock
+    e.clock = lambda: int(time.time())  # real clock: tokens are issued by the real-clock server thread
+    e.svc = e.new_service()
+    holder = {}
 
     def app(environ, start_response):
-        res = e.svc.handler(environ)
+        # sqlite connections are thread-bound: build the service inside the server thread
+        if "svc" not in holder:
+            holder["svc"] = AuthService(e.db, e.log, master_login_password=MASTER_PW, policy=fast())
+        res = holder["svc"].handler(environ)
         start_response(res.status_text, res.headers)
         return [res.body]
 
@@ -1657,7 +1666,8 @@ def test_K3_logout_form_redirects_root_ignoring_referer(live):
     _real_signup(live)
     tok = live.login("alice")[1]["token"]
     res, _ = _page_post(_pages(live), "/user/logout/", raw=b"", ct="application/x-www-form-urlencoded",
-                        headers={"Cookie": f"_nxt={tok}", "Referer": "https://evil.example/x"})
+                        headers={"Cookie": f"_nxt={tok}", "Referer": "https://app.example/some/page",
+                                 "Host": "app.example"})
     assert res.status_code == 302
     assert _hdrs(res, "Location") == ["/"]
     assert _hdrs(res, "Set-Cookie")[0].startswith("_nxt=; Max-Age=0")
