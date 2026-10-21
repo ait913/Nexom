@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
 from .app import (
     Request,
     Response,
@@ -47,4 +49,7 @@ __all__ = [
     "__version__",
 ]
 
-__version__ = "1.1.0"
+try:
+    __version__ = _pkg_version("nexom")
+except PackageNotFoundError:  # 未インストールのソースツリーから import した時
+    __version__ = "0.0.0+unknown"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from typing import Any, Iterable
 from sqlite3 import (
     connect, 
@@ -42,9 +44,10 @@ class DatabaseManager:
     - Applies safe PRAGMA defaults
     - Provides execute/execute_many helpers
     """
-    def __init__(self, db_file: str, auto_commit: bool = True):
+    def __init__(self, db_file: str, auto_commit: bool = True, *, file_mode: int | None = 0o600):
         self.db_file: str = db_file
         self.auto_commit: bool = auto_commit
+        self.file_mode = file_mode
 
         self._conn: Connection | None = None
         self._cursor: Cursor | None = None
@@ -61,6 +64,14 @@ class DatabaseManager:
         try:
             self.auto_commit = auto_commit
             self._conn = connect(self.db_file)
+            if (self.file_mode is not None and self.db_file != ":memory:"
+                    and not str(self.db_file).startswith("file:")):
+                try:
+                    os.chmod(self.db_file, self.file_mode)
+                except OSError as e:
+                    self._conn.close()
+                    self._conn = None
+                    raise DBOperationalError(str(e)) from e
             self._cursor = self._conn.cursor()
 
             # ---- SQLite safety / performance defaults ----
@@ -101,19 +112,17 @@ class DatabaseManager:
         """
         Execute a single SQL statement.
 
-        Returns rows for SELECT, otherwise None.
+        Returns rows for statements with a result set, otherwise None.
         """
         if self._conn is None or self._cursor is None:
             raise DBMConnectionInvalidError()
 
         try:
             self._cursor.execute(sql, tuple(args))
+            rows = self._cursor.fetchall() if self._cursor.description is not None else None
             if self.auto_commit:
                 self._conn.commit()
-
-            if sql.lstrip().upper().startswith("SELECT"):
-                return self._cursor.fetchall()
-            return None
+            return rows
 
         except Error as e:
             self._conn.rollback()

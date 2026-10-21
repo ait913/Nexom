@@ -24,7 +24,7 @@ class DetectedApp:
 
 
 class RunError(RuntimeError):
-    """Raised when naxom run fails."""
+    """Raised when nexom run fails."""
 
 
 def _is_windows() -> bool:
@@ -86,7 +86,7 @@ def run_project(
     - On Windows: gunicorn isn't supported (POSIX only) -> raise clear error.
     """
     if _is_windows():
-        raise RunError("naxom run is not supported on Windows (gunicorn is POSIX-only).")
+        raise RunError("nexom run is not supported on Windows (gunicorn is POSIX-only).")
 
     root = project_root.resolve()
     apps = _detect_apps(root)
