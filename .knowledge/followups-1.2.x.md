@@ -26,7 +26,8 @@ aisaba_platform を 1.2.0 に移行する際のリリース前ゲート (Codex +
    - `classify_file()` はマジックで `Images/.jpg` と判定するので登録は通り、後段の縮小・変換で `OSError: image file is truncated`
    - 直し方: デコード/変換の境界だけで `PIL.UnidentifiedImageError` / `OSError` を捕まえ、型付きの `Ps...Error` (例 `PsUndecodableImageError`) に変換。ディスク I/O の `OSError` まで飲まないよう範囲を限定する。アップロード時 (`register`/`commit`) にも 1 回デコードして早期に拒否するのが望ましい
 3. **`client_ip()` は接続元 (REMOTE_ADDR) が信頼プロキシかを検証しない** (設計上の既知事項、`request.py:28-41`)。`trusted_proxy_count>0` は「gunicorn が loopback 以外から到達不能」が前提。ドキュメント (Request 章) にこの前提を明記する。将来は `trusted_proxies=[cidr...]` で REMOTE_ADDR を検証するオプションを検討
-4. (aisaba 側で判明した運用知見) 雛形 wsgi をそのまま使うサービスが AppRouter のような独自ディスパッチを挟むと、`OPTIONS` が Nexom Router の 204 経路に乗らず 405 (`Allow` には OPTIONS が入る) になる。雛形か文書で、サブルータ利用時の OPTIONS の扱いを示す
+4. **Pillow の下限を `>=13.0.0` に上げ、`requires-python >= 3.11` にする** (2026-10-24 判明): Pillow 12.3.0 に GHSA 11 件 (high 6 / medium 5、2026-10-20〜22) が出て修正は 13.0.0 のみ、13 は Python ≥3.11 必須で 12.x への backport は無い。1.2.0 の `Pillow>=12.3.0` + `requires-python>=3.10` の組は 3.10 利用者を脆弱な Pillow に固定する。aisaba 本番は uv の standalone 3.12 に移して対処済み (projects/aisaba-platform §9.10)
+5. (aisaba 側で判明した運用知見) 雛形 wsgi をそのまま使うサービスが AppRouter のような独自ディスパッチを挟むと、`OPTIONS` が Nexom Router の 204 経路に乗らず 405 (`Allow` には OPTIONS が入る) になる。雛形か文書で、サブルータ利用時の OPTIONS の扱いを示す
 
 ## Why
 
